@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use nextgdrive_application::ports::{PortError, SyncStateStore, SyncedItem, SyncedKind};
 use nextgdrive_domain::{AccountId, DriveItemId};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS synced_items (
@@ -21,10 +21,16 @@ CREATE TABLE IF NOT EXISTS synced_items (
     local_modified  INTEGER NOT NULL,
     PRIMARY KEY (account_id, item_id)
 );
+CREATE TABLE IF NOT EXISTS cursors (
+    account_id TEXT PRIMARY KEY,
+    cursor     TEXT NOT NULL
+);
 ";
 
 pub struct SqliteSyncState {
     connection: Mutex<Connection>,
+    /// One lock file per account, held with `flock` while syncing.
+    lock_dir: PathBuf,
 }
 
 impl SqliteSyncState {
@@ -38,8 +44,11 @@ impl SqliteSyncState {
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(PortError::new)?;
         connection.execute_batch(SCHEMA).map_err(PortError::new)?;
+        let lock_dir = path.with_file_name("locks");
+        std::fs::create_dir_all(&lock_dir).map_err(PortError::new)?;
         Ok(Self {
             connection: Mutex::new(connection),
+            lock_dir,
         })
     }
 
@@ -93,7 +102,61 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<SyncedItem> {
     })
 }
 
+/// Account ids become file names; keep only safe characters.
+fn lock_file_name(account: &AccountId) -> String {
+    let safe: String = account
+        .as_str()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{safe}.lock")
+}
+
 impl SyncStateStore for SqliteSyncState {
+    /// The kernel releases the lock when the file is closed, even if the
+    /// process crashes.
+    type Lock = std::fs::File;
+
+    fn try_lock(&self, account: &AccountId) -> Result<Option<std::fs::File>, PortError> {
+        let path = self.lock_dir.join(lock_file_name(account));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(PortError::new)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => Err(PortError::new(e)),
+        }
+    }
+
+    fn cursor(&self, account: &AccountId) -> Result<Option<String>, PortError> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT cursor FROM cursors WHERE account_id = ?1",
+                [account.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+    }
+
+    fn set_cursor(&self, account: &AccountId, cursor: &str) -> Result<(), PortError> {
+        self.with(|c| {
+            c.prepare_cached("INSERT OR REPLACE INTO cursors (account_id, cursor) VALUES (?1, ?2)")?
+                .execute([account.as_str(), cursor])
+                .map(drop)
+        })
+    }
+
     fn items(&self, account: &AccountId) -> Result<Vec<SyncedItem>, PortError> {
         self.with(|c| {
             let mut statement =
@@ -191,6 +254,36 @@ mod tests {
 
         state.remove(&ana, &DriveItemId::new("1")).unwrap();
         assert!(state.items(&ana).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lock_is_exclusive_until_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.sqlite3");
+        // Two handles, as two processes would have.
+        let (a, b) = (
+            SqliteSyncState::open(&path).unwrap(),
+            SqliteSyncState::open(&path).unwrap(),
+        );
+        let ana = AccountId::new("ana");
+
+        let held = a.try_lock(&ana).unwrap();
+        assert!(held.is_some());
+        assert!(b.try_lock(&ana).unwrap().is_none());
+        assert!(b.try_lock(&AccountId::new("bob")).unwrap().is_some());
+        drop(held);
+        assert!(b.try_lock(&ana).unwrap().is_some());
+    }
+
+    #[test]
+    fn stores_change_feed_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = SqliteSyncState::open(&dir.path().join("state.sqlite3")).unwrap();
+        let ana = AccountId::new("ana");
+        assert_eq!(state.cursor(&ana).unwrap(), None);
+        state.set_cursor(&ana, "41").unwrap();
+        state.set_cursor(&ana, "42").unwrap();
+        assert_eq!(state.cursor(&ana).unwrap().as_deref(), Some("42"));
     }
 
     #[test]

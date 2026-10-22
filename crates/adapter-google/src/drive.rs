@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use nextgdrive_application::ports::{
-    AccessToken, DriveAccountInfo, DriveService, FileWriter, PortError,
+    AccessToken, Changes, DriveAccountInfo, DriveService, FileWriter, PortError,
 };
 use nextgdrive_domain::{
     Account, AccountId, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind, StorageQuota,
@@ -166,6 +166,21 @@ struct SharedDrive {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartPageToken {
+    start_page_token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangeList {
+    next_page_token: Option<String>,
+    new_start_page_token: Option<String>,
+    #[serde(default)]
+    changes: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
 struct ApiError {
     error: ApiErrorBody,
 }
@@ -250,6 +265,49 @@ impl DriveService for GoogleDrive {
             )
             .await?;
         file_to_item(file)
+    }
+
+    async fn changes_since(
+        &self,
+        token: &AccessToken,
+        cursor: Option<&str>,
+    ) -> Result<Changes, PortError> {
+        let all_drives = [("supportsAllDrives", "true")];
+        let Some(cursor) = cursor else {
+            let start: StartPageToken = self
+                .get(token, endpoint(&["changes", "startPageToken"]), &all_drives)
+                .await?;
+            return Ok(Changes {
+                any: true,
+                cursor: start.start_page_token,
+            });
+        };
+        let mut page = cursor.to_owned();
+        let mut any = false;
+        loop {
+            let list: ChangeList = self
+                .get(
+                    token,
+                    endpoint(&["changes"]),
+                    &[
+                        ("pageToken", page.as_str()),
+                        ("pageSize", "1000"),
+                        ("supportsAllDrives", "true"),
+                        ("includeItemsFromAllDrives", "true"),
+                        // Whether anything changed is all we need for now.
+                        ("fields", "nextPageToken,newStartPageToken,changes(fileId)"),
+                    ],
+                )
+                .await?;
+            any |= !list.changes.is_empty();
+            match (list.next_page_token, list.new_start_page_token) {
+                (Some(next), _) => page = next,
+                (None, Some(cursor)) => return Ok(Changes { any, cursor }),
+                (None, None) => {
+                    return Err(PortError::new("change feed page without continuation"));
+                }
+            }
+        }
     }
 
     async fn download<W: FileWriter>(

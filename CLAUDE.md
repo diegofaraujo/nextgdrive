@@ -63,6 +63,8 @@ Download-only for now (upload is the next phase). Invariants that tests in that 
 - Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`. The two folder names are translated once and pinned in `settings.toml`.
 - Google Docs/Sheets/etc. become small `.html` pages that redirect to the document (`.desktop` links do not open from COSMIC Files or recent Nautilus). Shortcuts are rewritten, never moved, when their name or format changes. Drive shortcuts and non-downloadable files are skipped and reported.
 
+Background sync (`application/src/background.rs`): `BackgroundSync::tick` reads Drive's change feed per account and runs `SyncAccount` when something changed remotely, the selection changed, or `FULL_SYNC_INTERVAL` (15 min) passed (the feed cannot report local deletions). The feed cursor is saved only after a successful sync. `SyncAccount` and `ChangeSelection::deselect` hold a per-account lock (`SyncStateStore::try_lock`; a `flock`ed file next to the SQLite DB), so the tray app, `nextgdrive daemon` and one-off CLI runs never sync the same account at once.
+
 To exercise the engine against a real account without touching the real setup, isolate everything except the keyring:
 
 ```bash
@@ -94,7 +96,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI: account add|status|remove, config show|sync-root, sync run|folders|select|deselect
+cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, account add|status|remove, config show|sync-root, sync run|folders|select|deselect
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 

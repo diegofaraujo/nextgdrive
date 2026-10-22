@@ -1,6 +1,7 @@
 //! Use cases of Next GDrive and the ports (traits) they need from the
 //! outside world. Adapters implement the ports; GUI and CLI call the use cases.
 
+pub mod background;
 mod error;
 pub mod ports;
 mod tokens;

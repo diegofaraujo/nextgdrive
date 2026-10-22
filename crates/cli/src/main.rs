@@ -7,6 +7,7 @@ use std::io::{IsTerminal, Write};
 use std::process::{ExitCode, Stdio};
 
 use nextgdrive_application::AppError;
+use nextgdrive_application::background::SyncEvent;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
 use nextgdrive_application::use_cases::{
     ConflictReason, LocalCopies, SkipReason, SyncProgress, SyncReport,
@@ -39,6 +40,7 @@ fn main() -> ExitCode {
 async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     let app_error = |e: AppError| i18n.app_error(&e);
     match command {
+        Command::Daemon => daemon(i18n).await?,
         Command::Account(AccountCommand::List) => {
             let local = LocalServices::new(i18n)?;
             let list = local.list_accounts().execute().map_err(app_error)?;
@@ -303,6 +305,65 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+/// Keeps accounts in sync until interrupted.
+async fn daemon(i18n: &Localizer) -> Result<(), String> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let app_error = |e: AppError| i18n.app_error(&e);
+    let services = Services::new(i18n).await?;
+    let background = services.background_sync();
+    let mut terminate = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
+    let on_event = |event: SyncEvent<'_>| match event {
+        SyncEvent::Started(account) => println!(
+            "{}",
+            i18n.tr_args(
+                "sync-started",
+                [("email", account.email.to_string().into())]
+            )
+        ),
+        SyncEvent::Finished(account, Ok(report)) => {
+            print_report(i18n, account, report);
+        }
+        SyncEvent::Finished(account, Err(e)) | SyncEvent::CheckFailed(account, e) => {
+            eprintln!("{}: {}", account.email, i18n.app_error(e));
+        }
+        SyncEvent::UpToDate(_) | SyncEvent::Progress(..) => {}
+    };
+
+    let interval = |i18n: &Localizer| -> Result<u64, String> {
+        let settings = services
+            .local
+            .get_settings()
+            .execute()
+            .map_err(|e| i18n.app_error(&e))?;
+        Ok(settings.poll_interval_secs)
+    };
+    println!(
+        "{}",
+        i18n.tr_args(
+            "cli-daemon-started",
+            [("secs", FluentValue::from(interval(i18n)?))]
+        )
+    );
+    loop {
+        // Dropping an unfinished sync is safe: partial downloads are
+        // discarded and the account lock is released.
+        tokio::select! {
+            result = background.tick(false, &on_event) => result.map_err(app_error)?,
+            _ = tokio::signal::ctrl_c() => break,
+            _ = terminate.recv() => break,
+        }
+        let pause = std::time::Duration::from_secs(interval(i18n)?);
+        tokio::select! {
+            () = tokio::time::sleep(pause) => {}
+            _ = tokio::signal::ctrl_c() => break,
+            _ = terminate.recv() => break,
+        }
+    }
+    println!("{}", i18n.tr("cli-daemon-stopped"));
     Ok(())
 }
 

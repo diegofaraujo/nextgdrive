@@ -19,6 +19,7 @@ struct SettingsFile {
     sync_root: Option<PathBuf>,
     my_drive_folder: Option<String>,
     shared_drives_folder: Option<String>,
+    poll_interval_secs: Option<u64>,
     /// Keyed by account id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     accounts: BTreeMap<String, AccountSettings>,
@@ -66,6 +67,11 @@ impl SettingsRepository for TomlSettingsRepository {
             shared_drives_folder: file
                 .shared_drives_folder
                 .unwrap_or(defaults.shared_drives_folder),
+            // A zero interval would make background sync spin.
+            poll_interval_secs: file
+                .poll_interval_secs
+                .filter(|secs| *secs > 0)
+                .unwrap_or(defaults.poll_interval_secs),
             selections: file
                 .accounts
                 .into_iter()
@@ -89,6 +95,7 @@ impl SettingsRepository for TomlSettingsRepository {
             sync_root: Some(settings.sync_root.clone()),
             my_drive_folder: Some(settings.my_drive_folder.clone()),
             shared_drives_folder: Some(settings.shared_drives_folder.clone()),
+            poll_interval_secs: Some(settings.poll_interval_secs),
             accounts: settings
                 .selections
                 .iter()
@@ -112,6 +119,7 @@ mod tests {
             sync_root: "/home/ana/GoogleDrive".into(),
             my_drive_folder: "Meu Drive".into(),
             shared_drives_folder: "Drives compartilhados".into(),
+            poll_interval_secs: 60,
             selections: BTreeMap::new(),
         }
     }

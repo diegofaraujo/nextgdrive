@@ -15,6 +15,7 @@ auth-callback-failure = O login não foi concluído. Volte ao Next GDrive e tent
 folder-my-drive = Meu Drive
 folder-shared-drives = Drives compartilhados
 sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
+sync-started = { $email }: sincronizando…
 sync-summary = { $email }: { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
 sync-conflict = Mantida a versão local, que foi alterada neste computador: { $path }
 sync-conflict-exists = Mantido o arquivo local existente, que é diferente do Drive e não foi criado pelo Next GDrive: { $path }
@@ -71,6 +72,9 @@ cli-folder-deselected-removed = Pasta desmarcada. { $removed ->
     [one] 1 item removido deste computador.
    *[other] { $removed } itens removidos deste computador.
 }
+cli-daemon-about = Manter as contas sincronizadas em primeiro plano, sem interface gráfica
+cli-daemon-started = O Next GDrive está rodando e verifica o Google Drive a cada { $secs } segundos. Pressione Ctrl+C para parar.
+cli-daemon-stopped = Next GDrive encerrado.
 
 ## GUI
 
@@ -155,3 +159,4 @@ error-oauth-client-missing = O cliente OAuth do Google não está configurado. S
 error-oauth-client-unreadable = Não foi possível ler o arquivo do cliente OAuth { $path }: { $details }
 error-invalid-sync-root = A pasta de sincronização precisa ser um caminho absoluto: { $path }
 error-not-a-folder = Não é uma pasta: { $id }
+error-sync-in-progress = Esta conta já está sendo sincronizada, por este ou por outro processo do Next GDrive.

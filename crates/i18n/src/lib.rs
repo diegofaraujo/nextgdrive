@@ -85,6 +85,7 @@ impl Localizer {
                 "error-account-not-found",
                 [("email", email.to_string().into())],
             ),
+            AppError::SyncInProgress(_) => self.tr("error-sync-in-progress"),
             AppError::MissingCredentials(email) => self.tr_args(
                 "error-missing-credentials",
                 [("email", email.to_string().into())],
