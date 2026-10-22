@@ -269,7 +269,7 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
 
 fn progress_line(i18n: &Localizer, p: &SyncProgress) -> String {
     i18n.tr_args(
-        "cli-sync-progress",
+        "sync-progress",
         [
             ("done", FluentValue::from(p.files_done)),
             ("total", FluentValue::from(p.files_total)),

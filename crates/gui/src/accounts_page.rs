@@ -1,33 +1,29 @@
 use std::cell::RefCell;
-use std::future::Future;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
 
 use adw::prelude::*;
-use gtk::glib;
-use nextgdrive_application::AppError;
+use gtk::gio;
 use nextgdrive_application::ports::PendingAuthorization;
-use nextgdrive_composition::{PendingSignIn, Services};
+use nextgdrive_composition::PendingSignIn;
 use nextgdrive_domain::Account;
-use nextgdrive_i18n::Localizer;
 
-use crate::runtime;
+use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
+use crate::{account_page, preferences};
 
 /// Lists linked accounts with their storage usage, and lets the user link and
 /// unlink accounts.
 struct AccountsPage {
-    i18n: Localizer,
-    services: Arc<Services>,
+    ctx: Rc<Ctx>,
     /// Shows either `list` or `status`.
     stack: gtk::Stack,
     list: adw::PreferencesPage,
     /// Rebuilt on every refresh.
     group: RefCell<adw::PreferencesGroup>,
     status: adw::StatusPage,
-    toasts: adw::ToastOverlay,
 }
 
-pub fn build(i18n: Localizer, services: Arc<Services>, header: &adw::HeaderBar) -> gtk::Widget {
+pub fn build(ctx: &Rc<Ctx>) -> adw::NavigationPage {
+    let i18n = &ctx.i18n;
     let list = adw::PreferencesPage::new();
     let group = adw::PreferencesGroup::new();
     list.add(&group);
@@ -35,65 +31,81 @@ pub fn build(i18n: Localizer, services: Arc<Services>, header: &adw::HeaderBar) 
     let stack = gtk::Stack::new();
     stack.add_child(&list);
     stack.add_child(&status);
-    let toasts = adw::ToastOverlay::new();
-    toasts.set_child(Some(&stack));
 
+    let header = adw::HeaderBar::new();
     let add = gtk::Button::builder()
         .icon_name("list-add-symbolic")
         .tooltip_text(i18n.tr("gui-add-account"))
         .build();
     header.pack_start(&add);
+    let menu = gio::Menu::new();
+    menu.append(
+        Some(&i18n.tr("gui-preferences")),
+        Some("accounts.preferences"),
+    );
+    header.pack_end(
+        &gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text(i18n.tr("gui-main-menu"))
+            .menu_model(&menu)
+            .build(),
+    );
 
+    let root = navigation_page(&i18n.tr("app-name"), &header, &stack);
     let page = Rc::new(AccountsPage {
-        i18n,
-        services,
+        ctx: ctx.clone(),
         stack,
         list,
         group: RefCell::new(group),
         status,
-        toasts,
     });
-    page.refresh();
-    let widget = page.toasts.clone().upcast();
-    // This closure owns the page: the header bar lives as long as the window,
-    // and the page holds no reference back to it, so there is no cycle.
-    // Everything the page itself owns must only hold a `Weak` to it.
-    add.connect_clicked(move |button| page.add_account(button));
-    widget
-}
 
-/// Runs `task` on the background runtime and hands its output to `then` on
-/// the GTK main thread. `then` is skipped if the page is gone by then.
-fn spawn<T, F>(page: &Rc<AccountsPage>, task: F, then: impl FnOnce(&Rc<AccountsPage>, T) + 'static)
-where
-    T: Send + 'static,
-    F: Future<Output = T> + Send + 'static,
-{
-    let handle = runtime().spawn(task);
-    let page = Rc::downgrade(page);
-    glib::spawn_future_local(async move {
-        if let (Ok(output), Some(page)) = (handle.await, page.upgrade()) {
-            then(&page, output);
+    let actions = gio::SimpleActionGroup::new();
+    let preferences = gio::SimpleAction::new("preferences", None);
+    let weak = Rc::downgrade(&page);
+    preferences.connect_activate(move |_, _| {
+        if let Some(page) = weak.upgrade() {
+            preferences::present(&page.ctx);
         }
     });
+    actions.add_action(&preferences);
+    root.insert_action_group("accounts", Some(&actions));
+
+    let weak = Rc::downgrade(&page);
+    add.connect_clicked(move |button| {
+        if let Some(page) = weak.upgrade() {
+            page.add_account(button);
+        }
+    });
+    // Refresh when coming back from an account's page.
+    let weak = Rc::downgrade(&page);
+    root.connect_shown(move |_| {
+        if let Some(page) = weak.upgrade() {
+            page.refresh();
+        }
+    });
+    page.refresh();
+    keep_alive(&root, page);
+    root
 }
 
 impl AccountsPage {
     fn refresh(self: &Rc<Self>) {
-        match self.services.local.list_accounts().execute() {
+        let i18n = &self.ctx.i18n;
+        match self.ctx.services.local.list_accounts().execute() {
             Err(e) => self.show_status(
                 "dialog-error-symbolic",
-                &self.i18n.tr("gui-load-error-title"),
-                &self.i18n.app_error(&e),
+                &i18n.tr("gui-load-error-title"),
+                &i18n.app_error(&e),
             ),
             Ok(list) if list.is_empty() => self.show_status(
                 "folder-remote-symbolic",
-                &self.i18n.tr("gui-no-accounts-title"),
-                &self.i18n.tr("gui-no-accounts-description"),
+                &i18n.tr("gui-no-accounts-title"),
+                &i18n.tr("gui-no-accounts-description"),
             ),
             Ok(list) => {
                 let group = adw::PreferencesGroup::builder()
-                    .title(self.i18n.tr("gui-accounts-title"))
+                    .title(i18n.tr("gui-accounts-title"))
                     .build();
                 for account in &list {
                     group.add(&self.account_row(account));
@@ -113,50 +125,64 @@ impl AccountsPage {
     }
 
     fn account_row(self: &Rc<Self>, account: &Account) -> adw::ActionRow {
+        let i18n = &self.ctx.i18n;
         let row = adw::ActionRow::builder()
             .title(account.email.as_str())
-            .subtitle(self.i18n.tr("gui-quota-loading"))
+            .subtitle(i18n.tr("gui-quota-loading"))
             // Emails and names are user data, not Pango markup.
             .use_markup(false)
+            .activatable(true)
             .build();
         let remove = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
-            .tooltip_text(self.i18n.tr("gui-remove-account"))
+            .tooltip_text(i18n.tr("gui-remove-account"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
-        let page = Rc::downgrade(self);
+        let weak = Rc::downgrade(self);
         let removed = account.clone();
         remove.connect_clicked(move |button| {
-            if let Some(page) = page.upgrade() {
+            if let Some(page) = weak.upgrade() {
                 page.confirm_remove(button, &removed);
             }
         });
         row.add_suffix(&remove);
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+
+        let weak = Rc::downgrade(self);
+        let opened = account.clone();
+        row.connect_activated(move |_| {
+            if let Some(page) = weak.upgrade() {
+                page.ctx
+                    .push(&account_page::build(&page.ctx, opened.clone()));
+            }
+        });
         self.load_quota(&row, account);
         row
     }
 
     fn load_quota(self: &Rc<Self>, row: &adw::ActionRow, account: &Account) {
-        let services = self.services.clone();
+        let services = self.ctx.services.clone();
         let account = account.clone();
-        let row = row.downgrade();
+        let (row, weak) = (row.downgrade(), Rc::downgrade(self));
         spawn(
-            self,
             async move { services.account_status().execute(&account).await },
-            move |page, result| {
-                let Some(row) = row.upgrade() else { return };
+            move |result| {
+                let (Some(row), Some(page)) = (row.upgrade(), weak.upgrade()) else {
+                    return;
+                };
+                let i18n = &page.ctx.i18n;
                 match result {
                     Ok(info) => {
-                        let quota = page.i18n.quota(&info.quota);
+                        let quota = i18n.quota(&info.quota);
                         row.set_subtitle(&match info.account.display_name {
                             Some(name) => format!("{name} · {quota}"),
                             None => quota,
                         });
                     }
                     Err(e) => {
-                        row.set_subtitle(&page.i18n.tr("gui-quota-error"));
-                        row.set_tooltip_text(Some(&page.i18n.app_error(&e)));
+                        row.set_subtitle(&i18n.tr("gui-quota-error"));
+                        row.set_tooltip_text(Some(&i18n.app_error(&e)));
                     }
                 }
             },
@@ -166,112 +192,116 @@ impl AccountsPage {
     /// Starts sign-in, opens the browser, and waits in a dialog that lets the user cancel.
     fn add_account(self: &Rc<Self>, button: &gtk::Button) {
         button.set_sensitive(false);
-        let services = self.services.clone();
-        let button = button.clone();
+        let services = self.ctx.services.clone();
+        let (button, weak) = (button.clone(), Rc::downgrade(self));
         spawn(
-            self,
             async move { services.add_account().start().await },
-            move |page, result| match result {
-                Ok(pending) => page.wait_for_sign_in(&button, pending),
-                Err(e) => {
-                    button.set_sensitive(true);
-                    page.toast(&page.i18n.app_error(&e));
+            move |result| {
+                let Some(page) = weak.upgrade() else { return };
+                match result {
+                    Ok(pending) => page.wait_for_sign_in(&button, pending),
+                    Err(e) => {
+                        button.set_sensitive(true);
+                        page.ctx.toast(&page.ctx.i18n.app_error(&e));
+                    }
                 }
             },
         );
     }
 
     fn wait_for_sign_in(self: &Rc<Self>, button: &gtk::Button, pending: PendingSignIn) {
+        let i18n = &self.ctx.i18n;
         let url = pending.url().to_owned();
-        let window = button.root().and_downcast::<gtk::Window>();
-        gtk::UriLauncher::new(&url).launch(window.as_ref(), gtk::gio::Cancellable::NONE, |_| {});
+        gtk::UriLauncher::new(&url).launch(
+            self.ctx.window().as_ref(),
+            gio::Cancellable::NONE,
+            |_| {},
+        );
 
         let dialog = adw::AlertDialog::new(
-            Some(&self.i18n.tr("gui-add-waiting-title")),
-            Some(&self.i18n.tr("gui-add-waiting-body")),
+            Some(&i18n.tr("gui-add-waiting-title")),
+            Some(&i18n.tr("gui-add-waiting-body")),
         );
         dialog.set_extra_child(Some(&gtk::LinkButton::with_label(
             &url,
-            &self.i18n.tr("gui-open-browser"),
+            &i18n.tr("gui-open-browser"),
         )));
-        dialog.add_response("cancel", &self.i18n.tr("gui-cancel"));
+        dialog.add_response("cancel", &i18n.tr("gui-cancel"));
         dialog.set_close_response("cancel");
 
-        let services = self.services.clone();
-        let handle = runtime().spawn(async move { services.add_account().finish(pending).await });
-        // Dropping the pending authorization closes the loopback server.
-        let abort = handle.abort_handle();
-        dialog.connect_response(Some("cancel"), move |_, _| abort.abort());
-        dialog.present(Some(button));
-
-        let page: Weak<Self> = Rc::downgrade(self);
-        let button = button.clone();
-        glib::spawn_future_local(async move {
-            let result = handle.await;
-            dialog.force_close();
-            button.set_sensitive(true);
-            let Some(page) = page.upgrade() else { return };
-            match result {
-                Ok(Ok(info)) => {
-                    let email = info.account.email.to_string();
-                    page.toast(
-                        &page
-                            .i18n
-                            .tr_args("account-added", [("email", email.into())]),
-                    );
-                    page.refresh();
+        let services = self.ctx.services.clone();
+        let (finished, weak, add) = (dialog.downgrade(), Rc::downgrade(self), button.clone());
+        // Aborting drops the pending authorization, which closes the loopback server.
+        let abort = spawn(
+            async move { services.add_account().finish(pending).await },
+            move |result| {
+                if let Some(dialog) = finished.upgrade() {
+                    dialog.force_close();
                 }
-                Ok(Err(e)) => page.toast(&page.i18n.app_error(&e)),
-                // Cancelled by the user.
-                Err(_) => {}
+                add.set_sensitive(true);
+                let Some(page) = weak.upgrade() else { return };
+                let i18n = &page.ctx.i18n;
+                match result {
+                    Ok(info) => {
+                        let email = info.account.email.to_string();
+                        page.ctx
+                            .toast(&i18n.tr_args("account-added", [("email", email.into())]));
+                        page.refresh();
+                    }
+                    Err(e) => page.ctx.toast(&i18n.app_error(&e)),
+                }
+            },
+        );
+        let add = button.downgrade();
+        dialog.connect_response(Some("cancel"), move |_, _| {
+            abort.abort();
+            // An aborted task's continuation never runs, so re-enable here.
+            if let Some(add) = add.upgrade() {
+                add.set_sensitive(true);
             }
         });
+        dialog.present(self.ctx.window().as_ref());
     }
 
     fn confirm_remove(self: &Rc<Self>, parent: &gtk::Button, account: &Account) {
+        let i18n = &self.ctx.i18n;
         let email = account.email.to_string();
         let dialog = adw::AlertDialog::new(
-            Some(
-                &self
-                    .i18n
-                    .tr_args("gui-remove-confirm-title", [("email", email.into())]),
-            ),
-            Some(&self.i18n.tr("gui-remove-confirm-body")),
+            Some(&i18n.tr_args("gui-remove-confirm-title", [("email", email.into())])),
+            Some(&i18n.tr("gui-remove-confirm-body")),
         );
         dialog.add_responses(&[
-            ("cancel", &self.i18n.tr("gui-cancel")),
-            ("remove", &self.i18n.tr("gui-remove")),
+            ("cancel", &i18n.tr("gui-cancel")),
+            ("remove", &i18n.tr("gui-remove")),
         ]);
         dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
 
-        let page: Weak<Self> = Rc::downgrade(self);
+        let weak: Weak<Self> = Rc::downgrade(self);
         let email = account.email.clone();
         dialog.connect_response(Some("remove"), move |_, _| {
-            let Some(page) = page.upgrade() else { return };
-            let services = page.services.clone();
+            let Some(page) = weak.upgrade() else { return };
+            let services = page.ctx.services.clone();
             let email = email.clone();
+            let weak = Rc::downgrade(&page);
             spawn(
-                &page,
                 async move { services.remove_account().execute(&email).await },
-                |page, result: Result<Account, AppError>| {
+                move |result| {
+                    let Some(page) = weak.upgrade() else { return };
+                    let i18n = &page.ctx.i18n;
                     let message = match result {
-                        Ok(removed) => page.i18n.tr_args(
+                        Ok(removed) => i18n.tr_args(
                             "account-removed",
                             [("email", removed.email.to_string().into())],
                         ),
-                        Err(e) => page.i18n.app_error(&e),
+                        Err(e) => i18n.app_error(&e),
                     };
-                    page.toast(&message);
+                    page.ctx.toast(&message);
                     page.refresh();
                 },
             );
         });
         dialog.present(Some(parent));
-    }
-
-    fn toast(&self, message: &str) {
-        self.toasts.add_toast(adw::Toast::new(message));
     }
 }
