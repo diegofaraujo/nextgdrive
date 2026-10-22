@@ -1,11 +1,15 @@
 //! Command-line definition. Built with clap's builder API rather than derive,
 //! because help texts must come from the translation files at runtime.
 
-use clap::{Arg, ArgAction, ArgMatches};
+use std::path::PathBuf;
+
+use clap::{Arg, ArgAction, ArgMatches, value_parser};
 use nextgdrive_i18n::Localizer;
 
 pub enum Command {
     Account(AccountCommand),
+    Config(ConfigCommand),
+    Sync(SyncCommand),
 }
 
 pub enum AccountCommand {
@@ -15,11 +19,50 @@ pub enum AccountCommand {
     Remove { email: String },
 }
 
+pub enum ConfigCommand {
+    Show,
+    SyncRoot { path: PathBuf },
+}
+
+pub enum SyncCommand {
+    Folders {
+        email: String,
+        folder: Option<String>,
+    },
+    Select {
+        email: String,
+        folder: String,
+    },
+    Deselect {
+        email: String,
+        folder: String,
+    },
+}
+
 pub fn parse(i18n: &Localizer) -> Command {
     from_matches(&command(i18n).get_matches())
 }
 
 fn command(i18n: &Localizer) -> clap::Command {
+    let email = |help: &str| {
+        Arg::new("email")
+            .value_name("EMAIL")
+            .required(true)
+            .help(i18n.tr(help))
+    };
+    let folder = || {
+        Arg::new("folder")
+            .value_name("FOLDER_ID")
+            .required(true)
+            .help(i18n.tr("cli-sync-folder-id"))
+    };
+    let group = |name: &'static str, about: &str| {
+        clap::Command::new(name)
+            .about(i18n.tr(about))
+            .subcommand_required(true)
+            .arg_required_else_help(true)
+    };
+
     let root = clap::Command::new("nextgdrive")
         .version(clap::crate_version!())
         .about(i18n.tr("cli-about"))
@@ -45,30 +88,58 @@ fn command(i18n: &Localizer) -> clap::Command {
                 .help(i18n.tr("cli-version")),
         )
         .subcommand(
-            clap::Command::new("account")
-                .about(i18n.tr("cli-account-about"))
-                .subcommand_required(true)
-                .arg_required_else_help(true)
+            group("account", "cli-account-about")
                 .subcommand(clap::Command::new("list").about(i18n.tr("cli-account-list-about")))
                 .subcommand(clap::Command::new("add").about(i18n.tr("cli-account-add-about")))
                 .subcommand(
                     clap::Command::new("status")
                         .about(i18n.tr("cli-account-status-about"))
-                        .arg(
-                            Arg::new("email")
-                                .value_name("EMAIL")
-                                .help(i18n.tr("cli-account-status-email")),
-                        ),
+                        .arg(email("cli-account-status-email").required(false)),
                 )
                 .subcommand(
                     clap::Command::new("remove")
                         .about(i18n.tr("cli-account-remove-about"))
+                        .arg(email("cli-account-remove-email")),
+                ),
+        )
+        .subcommand(
+            group("config", "cli-config-about")
+                .subcommand(clap::Command::new("show").about(i18n.tr("cli-config-show-about")))
+                .subcommand(
+                    clap::Command::new("sync-root")
+                        .about(i18n.tr("cli-config-sync-root-about"))
                         .arg(
-                            Arg::new("email")
-                                .value_name("EMAIL")
+                            Arg::new("path")
+                                .value_name("PATH")
                                 .required(true)
-                                .help(i18n.tr("cli-account-remove-email")),
+                                .value_parser(value_parser!(PathBuf))
+                                .help(i18n.tr("cli-config-sync-root-path")),
                         ),
+                ),
+        )
+        .subcommand(
+            group("sync", "cli-sync-about")
+                .subcommand(
+                    clap::Command::new("folders")
+                        .about(i18n.tr("cli-sync-folders-about"))
+                        .arg(email("cli-account-email"))
+                        .arg(
+                            folder()
+                                .required(false)
+                                .help(i18n.tr("cli-sync-folders-folder")),
+                        ),
+                )
+                .subcommand(
+                    clap::Command::new("select")
+                        .about(i18n.tr("cli-sync-select-about"))
+                        .arg(email("cli-account-email"))
+                        .arg(folder()),
+                )
+                .subcommand(
+                    clap::Command::new("deselect")
+                        .about(i18n.tr("cli-sync-deselect-about"))
+                        .arg(email("cli-account-email"))
+                        .arg(folder()),
                 ),
         );
     localize_headings(root, i18n)
@@ -100,23 +171,50 @@ fn localize_headings(command: clap::Command, i18n: &Localizer) -> clap::Command 
     command
 }
 
+fn string(matches: &ArgMatches, id: &str) -> String {
+    matches.get_one::<String>(id).cloned().unwrap_or_default()
+}
+
+fn no_subcommand() -> ! {
+    unreachable!("clap enforces a subcommand")
+}
+
 fn from_matches(matches: &ArgMatches) -> Command {
     match matches.subcommand() {
-        Some(("account", account)) => Command::Account(match account.subcommand() {
+        Some(("account", m)) => Command::Account(match m.subcommand() {
             Some(("list", _)) => AccountCommand::List,
             Some(("add", _)) => AccountCommand::Add,
-            Some(("status", status)) => AccountCommand::Status {
-                email: status.get_one::<String>("email").cloned(),
+            Some(("status", m)) => AccountCommand::Status {
+                email: m.get_one::<String>("email").cloned(),
             },
-            Some(("remove", remove)) => AccountCommand::Remove {
-                email: remove
-                    .get_one::<String>("email")
-                    .cloned()
-                    .unwrap_or_default(),
+            Some(("remove", m)) => AccountCommand::Remove {
+                email: string(m, "email"),
             },
-            _ => unreachable!("clap enforces a subcommand"),
+            _ => no_subcommand(),
         }),
-        _ => unreachable!("clap enforces a subcommand"),
+        Some(("config", m)) => Command::Config(match m.subcommand() {
+            Some(("show", _)) => ConfigCommand::Show,
+            Some(("sync-root", m)) => ConfigCommand::SyncRoot {
+                path: m.get_one::<PathBuf>("path").cloned().unwrap_or_default(),
+            },
+            _ => no_subcommand(),
+        }),
+        Some(("sync", m)) => Command::Sync(match m.subcommand() {
+            Some(("folders", m)) => SyncCommand::Folders {
+                email: string(m, "email"),
+                folder: m.get_one::<String>("folder").cloned(),
+            },
+            Some(("select", m)) => SyncCommand::Select {
+                email: string(m, "email"),
+                folder: string(m, "folder"),
+            },
+            Some(("deselect", m)) => SyncCommand::Deselect {
+                email: string(m, "email"),
+                folder: string(m, "folder"),
+            },
+            _ => no_subcommand(),
+        }),
+        _ => no_subcommand(),
     }
 }
 
@@ -124,18 +222,35 @@ fn from_matches(matches: &ArgMatches) -> Command {
 mod tests {
     use super::*;
 
+    fn parse_args(args: &[&str]) -> Command {
+        let matches = command(&Localizer::new("en-US"))
+            .try_get_matches_from(std::iter::once("nextgdrive").chain(args.iter().copied()))
+            .unwrap();
+        from_matches(&matches)
+    }
+
     #[test]
     fn command_definition_is_valid() {
         command(&Localizer::new("en-US")).debug_assert();
     }
 
     #[test]
-    fn parses_account_remove() {
-        let matches = command(&Localizer::new("en-US"))
-            .try_get_matches_from(["nextgdrive", "account", "remove", "ana@x.com"])
-            .unwrap();
-        assert!(
-            matches!(from_matches(&matches), Command::Account(AccountCommand::Remove { email }) if email == "ana@x.com")
-        );
+    fn parses_subcommands() {
+        assert!(matches!(
+            parse_args(&["account", "remove", "ana@x.com"]),
+            Command::Account(AccountCommand::Remove { email }) if email == "ana@x.com"
+        ));
+        assert!(matches!(
+            parse_args(&["sync", "folders", "ana@x.com"]),
+            Command::Sync(SyncCommand::Folders { folder: None, .. })
+        ));
+        assert!(matches!(
+            parse_args(&["sync", "select", "ana@x.com", "abc"]),
+            Command::Sync(SyncCommand::Select { folder, .. }) if folder == "abc"
+        ));
+        assert!(matches!(
+            parse_args(&["config", "sync-root", "/data"]),
+            Command::Config(ConfigCommand::SyncRoot { path }) if path.as_os_str() == "/data"
+        ));
     }
 }

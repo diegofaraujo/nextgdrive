@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::time::Duration;
 
 use super::PortError;
 
@@ -41,6 +42,13 @@ pub struct AuthorizedTokens {
     pub refresh: RefreshToken,
 }
 
+/// A fresh access token and how long it stays valid.
+#[derive(Debug, Clone)]
+pub struct AccessGrant {
+    pub token: AccessToken,
+    pub expires_in: Duration,
+}
+
 /// An authorization started with [`Authenticator::start`], waiting for the
 /// user to sign in.
 pub trait PendingAuthorization: Send {
@@ -63,7 +71,7 @@ pub trait Authenticator: Sync {
     fn refresh(
         &self,
         token: &RefreshToken,
-    ) -> impl Future<Output = Result<AccessToken, PortError>> + Send;
+    ) -> impl Future<Output = Result<AccessGrant, PortError>> + Send;
 }
 
 #[cfg(test)]

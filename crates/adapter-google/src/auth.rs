@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use nextgdrive_application::ports::{
-    AccessToken, Authenticator, AuthorizedTokens, PendingAuthorization, PortError, RefreshToken,
+    AccessGrant, AccessToken, Authenticator, AuthorizedTokens, PendingAuthorization, PortError,
+    RefreshToken,
 };
 use oauth2::basic::BasicClient;
 use oauth2::{
@@ -20,6 +21,7 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive";
 /// How long to wait for the user to finish signing in.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(60 * 60);
 
 type OAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
@@ -122,14 +124,18 @@ impl Authenticator for GoogleAuthenticator {
         })
     }
 
-    async fn refresh(&self, token: &RefreshToken) -> Result<AccessToken, PortError> {
+    async fn refresh(&self, token: &RefreshToken) -> Result<AccessGrant, PortError> {
         let response = self
             .client
             .exchange_refresh_token(&oauth2::RefreshToken::new(token.secret().to_owned()))
             .request_async(&self.http)
             .await
             .map_err(|e| PortError::new(format!("token refresh failed: {e}")))?;
-        Ok(AccessToken::new(response.access_token().secret()))
+        Ok(AccessGrant {
+            token: AccessToken::new(response.access_token().secret()),
+            // Google access tokens last one hour; it always sends `expires_in`.
+            expires_in: response.expires_in().unwrap_or(DEFAULT_TOKEN_LIFETIME),
+        })
     }
 }
 

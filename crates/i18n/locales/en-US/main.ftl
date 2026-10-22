@@ -11,6 +11,10 @@ quota-used-unlimited = { $used } used
 auth-callback-success = You are signed in. You can close this tab and return to Next GDrive.
 auth-callback-failure = Sign-in was not completed. Return to Next GDrive and try again.
 
+# Folders created inside each account folder. Chosen once, on first use.
+folder-my-drive = My Drive
+folder-shared-drives = Shared drives
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -30,6 +34,27 @@ cli-account-status-email = Only this account (default: all)
 cli-account-add-open-url = Open this address in your browser to sign in:
 cli-account-add-waiting = Waiting for you to sign in…
 cli-account-list-empty = No accounts linked.
+cli-config-about = Show or change settings
+cli-config-show-about = Show current settings
+cli-config-sync-root-about = Change the folder that holds synced accounts
+cli-config-sync-root-path = New sync folder
+cli-sync-about = Choose what to sync
+cli-sync-folders-about = List drives, or subfolders of a folder, marking selected ones with [x]
+cli-sync-folders-folder = Folder id (default: list the account's drives)
+cli-sync-select-about = Sync a folder and everything inside it
+cli-sync-deselect-about = Stop syncing a folder
+cli-sync-folder-id = Folder or drive id, as shown by "sync folders"
+cli-account-email = Account email
+cli-settings-sync-root = Sync folder: { $path }
+cli-settings-selection = { $email }: { $count ->
+    [0] nothing selected
+    [one] 1 folder selected
+   *[other] { $count } folders selected
+}
+cli-sync-root-changed = Sync folder changed to { $path }. Files already synced were not moved.
+cli-folder-selected = Folder selected. It will be downloaded on the next sync.
+cli-folder-deselected = Folder deselected. Local copies were kept.
+cli-no-folders = No subfolders.
 
 ## GUI
 
@@ -61,3 +86,5 @@ error-credentials = Could not access the system keyring: { $details }
 error-drive = Google Drive request failed: { $details }
 error-oauth-client-missing = The Google OAuth client is not configured. Save the JSON file downloaded from Google Cloud Console as { $path }, or set { $id_var } and { $secret_var }.
 error-oauth-client-unreadable = Could not read the OAuth client file { $path }: { $details }
+error-invalid-sync-root = The sync folder must be an absolute path: { $path }
+error-not-a-folder = Not a folder: { $id }

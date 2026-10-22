@@ -58,7 +58,6 @@ impl TomlAccountRepository {
             .collect()
     }
 
-    /// Writes to a temporary file first, so a crash never leaves a truncated file behind.
     fn store(&self, accounts: &[Account]) -> Result<(), PortError> {
         let file = AccountsFile {
             accounts: accounts
@@ -71,12 +70,7 @@ impl TomlAccountRepository {
                 .collect(),
         };
         let text = toml::to_string(&file).map_err(|e| self.error(e))?;
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir).map_err(|e| self.error(e))?;
-        }
-        let tmp = self.path.with_extension("toml.tmp");
-        fs::write(&tmp, text).map_err(|e| self.error(e))?;
-        fs::rename(&tmp, &self.path).map_err(|e| self.error(e))
+        crate::write_atomically(&self.path, &text).map_err(|e| self.error(e))
     }
 
     fn error(&self, source: impl std::fmt::Display) -> PortError {

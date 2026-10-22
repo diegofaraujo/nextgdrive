@@ -4,7 +4,7 @@ use crate::DomainError;
 
 /// Stable identifier Google assigns to a user. Unlike the email, it never
 /// changes, so it is the account's identity.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AccountId(String);
 
 impl AccountId {
