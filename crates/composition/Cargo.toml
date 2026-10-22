@@ -1,0 +1,18 @@
+[package]
+name = "nextgdrive-composition"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nextgdrive-adapter-config = { version = "0.1.0", path = "../adapter-config" }
+nextgdrive-adapter-google = { version = "0.1.0", path = "../adapter-google" }
+nextgdrive-adapter-keyring = { version = "0.1.0", path = "../adapter-keyring" }
+nextgdrive-application = { version = "0.1.0", path = "../application" }
+nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+nextgdrive-i18n = { version = "0.1.0", path = "../i18n" }

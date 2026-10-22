@@ -1,0 +1,18 @@
+[package]
+name = "nextgdrive-adapter-keyring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nextgdrive-application = { version = "0.1.0", path = "../application" }
+nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+oo7 = { version = "0.6.0", default-features = false, features = ["tokio", "native_crypto"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros"] }

@@ -5,6 +5,8 @@
 
 mod account;
 mod error;
+mod quota;
 
 pub use account::{Account, AccountId, Email};
 pub use error::DomainError;
+pub use quota::StorageQuota;

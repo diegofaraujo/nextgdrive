@@ -2,7 +2,7 @@
 
 An open-source Google Drive sync client for Linux, written in Rust.
 
-> **Status:** early development. Nothing is usable yet.
+> **Status:** early development. You can link Google accounts and see their storage usage; file sync is not implemented yet.
 
 ## Goals
 
@@ -12,6 +12,37 @@ An open-source Google Drive sync client for Linux, written in Rust.
 - **Graphical interface** to add and remove accounts, configure sync, and see each account's status (storage usage, sync progress, errors).
 - **Command-line interface** with the same features, for headless setups and scripting.
 - **Multilingual**: English, Portuguese (Brazil), and Spanish to start.
+
+## Building from source
+
+Requirements: Rust 1.92 or newer, and the GTK 4 (≥ 4.14) and libadwaita (≥ 1.5) development packages. On Ubuntu or Pop!_OS 24.04:
+
+```bash
+sudo apt install libgtk-4-dev libadwaita-1-dev
+cargo build --release
+```
+
+This produces two programs in `target/release/`: `nextgdrive-gui` (graphical app) and `nextgdrive` (command line).
+
+### Google OAuth client
+
+Next GDrive does not ship Google API credentials yet, so you need your own OAuth client:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
+2. Under **Google Auth Platform**, configure the consent screen with audience **External**, and add your Google accounts as **test users**.
+3. Under **Clients**, create a client of type **Desktop app** and download its JSON file.
+4. Save that file as `~/.config/nextgdrive/oauth-client.json` (or set `NEXTGDRIVE_CLIENT_ID` and `NEXTGDRIVE_CLIENT_SECRET`).
+
+### Usage
+
+```bash
+nextgdrive account add       # sign in with Google in your browser
+nextgdrive account status    # storage usage of each linked account
+nextgdrive account list
+nextgdrive account remove <email>
+```
+
+Refresh tokens are stored in the system keyring (Secret Service, such as GNOME Keyring), never in plain files.
 
 ## Architecture
 

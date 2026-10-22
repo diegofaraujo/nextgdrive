@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub use fluent_templates::fluent_bundle::FluentValue;
 use fluent_templates::{LanguageIdentifier, Loader, langid};
 use nextgdrive_application::AppError;
-use nextgdrive_domain::DomainError;
+use nextgdrive_domain::{DomainError, StorageQuota};
 
 fluent_templates::static_loader! {
     static LOCALES = {
@@ -78,14 +78,55 @@ impl Localizer {
 
     /// User-facing message for an application error.
     pub fn app_error(&self, error: &AppError) -> String {
+        let details =
+            |id, e: &dyn std::fmt::Display| self.tr_args(id, [("details", e.to_string().into())]);
         match error {
             AppError::AccountNotFound(email) => self.tr_args(
                 "error-account-not-found",
                 [("email", email.to_string().into())],
             ),
-            AppError::Repository(e) => {
-                self.tr_args("error-storage", [("details", e.to_string().into())])
-            }
+            AppError::MissingCredentials(email) => self.tr_args(
+                "error-missing-credentials",
+                [("email", email.to_string().into())],
+            ),
+            AppError::Storage(e) => details("error-storage", e),
+            AppError::Auth(e) => details("error-auth", e),
+            AppError::Credentials(e) => details("error-credentials", e),
+            AppError::Drive(e) => details("error-drive", e),
+        }
+    }
+
+    /// Size in the units Google uses: powers of 1024 labeled KB, MB, GB, TB.
+    pub fn bytes(&self, bytes: u64) -> String {
+        const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+        #[allow(clippy::cast_precision_loss)] // Display only.
+        let mut value = bytes as f64;
+        let mut unit = 0;
+        while value >= 1024.0 && unit < UNITS.len() - 1 {
+            value /= 1024.0;
+            unit += 1;
+        }
+        // One decimal for small values ("1.5 GB"), none for large ones ("15 GB").
+        let number = if unit > 0 && value < 10.0 && value.fract() >= 0.05 {
+            format!("{value:.1}").replace('.', &self.tr("decimal-separator"))
+        } else {
+            format!("{value:.0}")
+        };
+        format!("{number} {}", UNITS[unit])
+    }
+
+    pub fn quota(&self, quota: &StorageQuota) -> String {
+        let used = ("used", self.bytes(quota.usage).into());
+        match (quota.limit, quota.available()) {
+            (Some(limit), Some(free)) => self.tr_args(
+                "quota-used",
+                [
+                    used,
+                    ("total", self.bytes(limit).into()),
+                    ("free", self.bytes(free).into()),
+                ],
+            ),
+            _ => self.tr_args("quota-used-unlimited", [used]),
         }
     }
 
@@ -132,6 +173,30 @@ mod tests {
         assert_eq!(
             pt.tr_args("error-account-not-found", [("email", "ana@x.com".into())]),
             "Nenhuma conta com o e-mail ana@x.com."
+        );
+    }
+
+    #[test]
+    fn formats_sizes_per_locale() {
+        let (en, pt) = (Localizer::new("en-US"), Localizer::new("pt-BR"));
+        assert_eq!(en.bytes(0), "0 B");
+        assert_eq!(en.bytes(1536), "1.5 KB");
+        assert_eq!(pt.bytes(1536), "1,5 KB");
+        assert_eq!(pt.bytes(5 << 30), "5 GB");
+        assert_eq!(pt.bytes(15 << 30), "15 GB");
+        assert_eq!(
+            pt.quota(&StorageQuota {
+                usage: 3 << 29,
+                limit: Some(15 << 30)
+            }),
+            "1,5 GB de 15 GB usados (14 GB livres)"
+        );
+        assert_eq!(
+            en.quota(&StorageQuota {
+                usage: 10,
+                limit: None
+            }),
+            "10 B used"
         );
     }
 
