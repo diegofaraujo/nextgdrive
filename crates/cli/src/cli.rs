@@ -5,8 +5,14 @@ use clap::{Arg, ArgAction, ArgMatches};
 use nextgdrive_i18n::Localizer;
 
 pub enum Command {
-    AccountList,
-    AccountRemove { email: String },
+    Account(AccountCommand),
+}
+
+pub enum AccountCommand {
+    List,
+    Add,
+    Status { email: Option<String> },
+    Remove { email: String },
 }
 
 pub fn parse(i18n: &Localizer) -> Command {
@@ -44,6 +50,16 @@ fn command(i18n: &Localizer) -> clap::Command {
                 .subcommand_required(true)
                 .arg_required_else_help(true)
                 .subcommand(clap::Command::new("list").about(i18n.tr("cli-account-list-about")))
+                .subcommand(clap::Command::new("add").about(i18n.tr("cli-account-add-about")))
+                .subcommand(
+                    clap::Command::new("status")
+                        .about(i18n.tr("cli-account-status-about"))
+                        .arg(
+                            Arg::new("email")
+                                .value_name("EMAIL")
+                                .help(i18n.tr("cli-account-status-email")),
+                        ),
+                )
                 .subcommand(
                     clap::Command::new("remove")
                         .about(i18n.tr("cli-account-remove-about"))
@@ -86,16 +102,20 @@ fn localize_headings(command: clap::Command, i18n: &Localizer) -> clap::Command 
 
 fn from_matches(matches: &ArgMatches) -> Command {
     match matches.subcommand() {
-        Some(("account", account)) => match account.subcommand() {
-            Some(("list", _)) => Command::AccountList,
-            Some(("remove", remove)) => Command::AccountRemove {
+        Some(("account", account)) => Command::Account(match account.subcommand() {
+            Some(("list", _)) => AccountCommand::List,
+            Some(("add", _)) => AccountCommand::Add,
+            Some(("status", status)) => AccountCommand::Status {
+                email: status.get_one::<String>("email").cloned(),
+            },
+            Some(("remove", remove)) => AccountCommand::Remove {
                 email: remove
                     .get_one::<String>("email")
                     .cloned()
                     .unwrap_or_default(),
             },
             _ => unreachable!("clap enforces a subcommand"),
-        },
+        }),
         _ => unreachable!("clap enforces a subcommand"),
     }
 }
@@ -115,7 +135,7 @@ mod tests {
             .try_get_matches_from(["nextgdrive", "account", "remove", "ana@x.com"])
             .unwrap();
         assert!(
-            matches!(from_matches(&matches), Command::AccountRemove { email } if email == "ana@x.com")
+            matches!(from_matches(&matches), Command::Account(AccountCommand::Remove { email }) if email == "ana@x.com")
         );
     }
 }

@@ -29,19 +29,29 @@ Clean Architecture + Hexagonal (Ports & Adapters) in a Cargo workspace with one 
 
 | Crate | Role | May depend on |
 |---|---|---|
-| `domain` | Entities and rules (e.g. `Account`, validated `Email`). Pure, no I/O. | nothing internal |
-| `application` | Use cases (`use_cases/`) and the ports they need (`ports/`, traits like `AccountRepository`). | `domain` |
-| `adapter-*` | Driven adapters implementing ports. `adapter-config`: TOML files under XDG config (`~/.config/nextgdrive/accounts.toml`). | `domain`, `application` |
-| `i18n` | Fluent translations shared by GUI and CLI, plus mapping of `AppError`/`DomainError` to localized messages. | `domain`, `application` |
-| `cli` | Binary `nextgdrive` (clap). Composition root for the CLI. | everything |
-| `gui` | Binary `nextgdrive-gui` (GTK4 + libadwaita, app id `io.github.diegofaraujo.NextGDrive`). Composition root for the GUI. | everything |
+| `domain` | Entities and rules (`Account`, validated `Email`, `StorageQuota`). Pure, no I/O. | nothing internal |
+| `application` | Use cases (`use_cases/`) and the ports they need (`ports/`: `AccountRepository`, `Authenticator`, `CredentialStore`, `DriveService`). | `domain` |
+| `adapter-config` | `AccountRepository` as TOML under XDG config (`~/.config/nextgdrive/accounts.toml`). | `domain`, `application` |
+| `adapter-google` | `Authenticator` (OAuth 2.0 for installed apps: PKCE + loopback server on `127.0.0.1:<random port>`) and `DriveService` (Drive API v3). | `domain`, `application` |
+| `adapter-keyring` | `CredentialStore` in the Secret Service keyring via `oo7`. Only refresh tokens are stored, never on disk. | `domain`, `application` |
+| `i18n` | Fluent translations shared by GUI and CLI; maps `AppError`/`DomainError` to messages; formats sizes and quotas. | `domain`, `application` |
+| `composition` | Shared composition root: builds the concrete adapters (`Services`) and localizes setup errors. | everything except front-ends |
+| `cli` | Binary `nextgdrive` (clap). | `composition`, inner layers |
+| `gui` | Binary `nextgdrive-gui` (GTK4 + libadwaita, app id `io.github.diegofaraujo.NextGDrive`). | `composition`, inner layers |
 
 Patterns to follow:
 
 - Use cases are small structs generic over their ports (`ListAccounts::new(&repo).execute()`), not trait objects. Unit tests use in-memory fakes from `application/src/use_cases/fakes.rs`.
-- Adapters wrap their failures in the opaque `RepositoryError`; the application layer never sees adapter-specific error types.
+- Async ports declare `fn ... -> impl Future<Output = ...> + Send` so use-case futures can run on a multi-threaded runtime; implementations just write `async fn`. Local, cheap ports (`AccountRepository`) are synchronous.
+- Adapters wrap their failures in the opaque `PortError`. Use cases map each port's errors to a distinct `AppError` variant (`Storage`, `Auth`, `Credentials`, `Drive`), which front-ends localize.
+- Tokens (`AccessToken`, `RefreshToken`) redact themselves in `Debug`; read them only through `.secret()` at the point of use.
+- Sign-in is two-step (`AddAccount::start` → `pending.url()` → `AddAccount::finish`) so each front-end opens the URL its own way (CLI: print + `xdg-open`; GUI: `gtk::UriLauncher`).
+- GUI threading: GTK stays on the main thread; use cases run on the Tokio runtime from `gui::runtime()`, and results come back through `glib::spawn_future_local` (see the `spawn` helper in `accounts_page.rs`). Never block the main thread on network or keyring calls.
 - GUI and CLI contain no business logic; they call use cases and render results.
-- New Google Drive features (OAuth, Drive API, sync engine, file watcher, keyring credentials) go in new `adapter-*` crates behind new ports in `application`.
+
+### Google OAuth client
+
+The OAuth client (Google Cloud "Desktop app") is not in the repository; each developer uses their own. It is read from `NEXTGDRIVE_CLIENT_ID` + `NEXTGDRIVE_CLIENT_SECRET`, otherwise from the JSON downloaded from Google Cloud Console saved as `~/.config/nextgdrive/oauth-client.json`. The app requests the full `drive` scope (needed for two-way sync). While the Google Cloud app is in testing mode, only accounts listed as test users can sign in.
 
 ### i18n
 
@@ -57,11 +67,14 @@ Build requirements: Rust ≥ 1.92 (workspace MSRV, required by gtk4-rs 0.11) and
 ```bash
 cargo build                                   # build everything
 cargo test                                    # run all tests
+cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against the real session keyring
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI
+cargo run -p nextgdrive-cli -- account list   # run the CLI (also: account add | status | remove)
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 
-Set `XDG_CONFIG_HOME=$(mktemp -d)` to run against a throwaway config instead of `~/.config/nextgdrive`.
+Set `XDG_CONFIG_HOME=$(mktemp -d)` to run against a throwaway config instead of `~/.config/nextgdrive` (copy `oauth-client.json` into it if you need sign-in).
+
+When checking the GUI headlessly with GTK's Broadway backend, libadwaita layouts render squeezed to minimum width; that is a Broadway artifact. Verify layout on a real desktop session.

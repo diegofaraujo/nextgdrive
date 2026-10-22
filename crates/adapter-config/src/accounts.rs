@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use nextgdrive_application::ports::{AccountRepository, RepositoryError};
+use nextgdrive_application::ports::{AccountRepository, PortError};
 use nextgdrive_domain::{Account, AccountId, Email};
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,7 @@ impl TomlAccountRepository {
         &self.path
     }
 
-    fn load(&self) -> Result<Vec<Account>, RepositoryError> {
+    fn load(&self) -> Result<Vec<Account>, PortError> {
         let text = match fs::read_to_string(&self.path) {
             Ok(text) => text,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -59,7 +59,7 @@ impl TomlAccountRepository {
     }
 
     /// Writes to a temporary file first, so a crash never leaves a truncated file behind.
-    fn store(&self, accounts: &[Account]) -> Result<(), RepositoryError> {
+    fn store(&self, accounts: &[Account]) -> Result<(), PortError> {
         let file = AccountsFile {
             accounts: accounts
                 .iter()
@@ -79,21 +79,21 @@ impl TomlAccountRepository {
         fs::rename(&tmp, &self.path).map_err(|e| self.error(e))
     }
 
-    fn error(&self, source: impl std::fmt::Display) -> RepositoryError {
-        RepositoryError::new(format!("{}: {source}", self.path.display()))
+    fn error(&self, source: impl std::fmt::Display) -> PortError {
+        PortError::new(format!("{}: {source}", self.path.display()))
     }
 }
 
 impl AccountRepository for TomlAccountRepository {
-    fn list(&self) -> Result<Vec<Account>, RepositoryError> {
+    fn list(&self) -> Result<Vec<Account>, PortError> {
         self.load()
     }
 
-    fn find_by_email(&self, email: &Email) -> Result<Option<Account>, RepositoryError> {
+    fn find_by_email(&self, email: &Email) -> Result<Option<Account>, PortError> {
         Ok(self.load()?.into_iter().find(|a| &a.email == email))
     }
 
-    fn save(&self, account: &Account) -> Result<(), RepositoryError> {
+    fn save(&self, account: &Account) -> Result<(), PortError> {
         let mut accounts = self.load()?;
         match accounts.iter_mut().find(|a| a.id == account.id) {
             Some(existing) => *existing = account.clone(),
@@ -102,7 +102,7 @@ impl AccountRepository for TomlAccountRepository {
         self.store(&accounts)
     }
 
-    fn remove(&self, id: &AccountId) -> Result<(), RepositoryError> {
+    fn remove(&self, id: &AccountId) -> Result<(), PortError> {
         let mut accounts = self.load()?;
         accounts.retain(|a| &a.id != id);
         self.store(&accounts)

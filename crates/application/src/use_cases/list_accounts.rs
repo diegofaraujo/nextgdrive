@@ -14,7 +14,7 @@ impl<'a, R: AccountRepository> ListAccounts<'a, R> {
 
     /// Returns the linked accounts sorted by email.
     pub fn execute(&self) -> Result<Vec<Account>, AppError> {
-        let mut accounts = self.accounts.list()?;
+        let mut accounts = self.accounts.list().map_err(AppError::Storage)?;
         accounts.sort_by(|a, b| a.email.as_str().cmp(b.email.as_str()));
         Ok(accounts)
     }
