@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Repository: https://github.com/diegofaraujo/nextgdrive (GitHub, default branch `main`; use the `gh` CLI for issues/PRs)
 - Target platform: **Linux only** (for now). Prefer Linux-native integrations (e.g. inotify for file watching, Secret Service/libsecret for credentials, XDG base directories for config/data/cache paths) over cross-platform abstractions when they conflict.
-- License: GPL-3.0. Only add dependencies with GPL-3.0-compatible licenses (e.g. MIT, Apache-2.0, BSD, MPL-2.0).
+- License: GPL-3.0-or-later (set once in the root `Cargo.toml` `[workspace.package]`). Only add dependencies with GPL-3.0-compatible licenses (e.g. MIT, Apache-2.0, BSD, MPL-2.0).
 
 Core requirements:
 

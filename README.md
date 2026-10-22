@@ -23,4 +23,4 @@ Contributions are welcome. Code, comments, commit messages, and documentation ar
 
 ## License
 
-Licensed under the [GNU General Public License v3.0](LICENSE).
+Licensed under the [GNU General Public License v3.0](LICENSE) or (at your option) any later version.
