@@ -503,6 +503,13 @@ impl LocalFileSystem for FakeFileSystem {
         }
     }
 
+    async fn has_content(&self, path: &Path, expected: &[u8]) -> Result<bool, PortError> {
+        Ok(matches!(
+            self.nodes.lock().unwrap().get(path),
+            Some(Node::File { content, .. }) if content == expected
+        ))
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> Result<(), PortError> {
         let mut nodes = self.nodes.lock().unwrap();
         if nodes.contains_key(to) {

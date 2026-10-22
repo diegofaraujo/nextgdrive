@@ -45,6 +45,13 @@ pub trait LocalFileSystem: Sync {
     /// MD5 of an existing file, in lowercase hex.
     fn md5_hex(&self, path: &Path) -> impl Future<Output = Result<String, PortError>> + Send;
 
+    /// Whether an existing file holds exactly `expected`.
+    fn has_content(
+        &self,
+        path: &Path,
+        expected: &[u8],
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+
     /// Fails if something already exists at `to`.
     fn rename(&self, from: &Path, to: &Path) -> Result<(), PortError>;
 

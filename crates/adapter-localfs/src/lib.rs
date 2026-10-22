@@ -133,6 +133,16 @@ impl LocalFileSystem for Filesystem {
         }
     }
 
+    async fn has_content(&self, path: &Path, expected: &[u8]) -> Result<bool, PortError> {
+        // Cheap check first: only read files of the right size.
+        match self.metadata(path)? {
+            Some(meta) if !meta.is_dir && meta.size == expected.len() as u64 => {}
+            _ => return Ok(false),
+        }
+        let content = tokio::fs::read(path).await.map_err(|e| error(path, e))?;
+        Ok(content == expected)
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> Result<(), PortError> {
         // `rename` would silently replace an existing file.
         if fs::symlink_metadata(to).is_ok() {
@@ -194,6 +204,17 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&target).unwrap(), "old");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn compares_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a");
+        fs::write(&path, "same").unwrap();
+        assert!(Filesystem.has_content(&path, b"same").await.unwrap());
+        assert!(!Filesystem.has_content(&path, b"diff").await.unwrap());
+        assert!(!Filesystem.has_content(&path, b"longer").await.unwrap());
+        assert!(!Filesystem.has_content(dir.path(), b"").await.unwrap());
     }
 
     #[test]

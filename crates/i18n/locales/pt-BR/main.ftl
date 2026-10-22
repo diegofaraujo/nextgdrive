@@ -17,6 +17,7 @@ folder-shared-drives = Drives compartilhados
 sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
 sync-summary = { $email }: { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
 sync-conflict = Mantida a versão local, que foi alterada neste computador: { $path }
+sync-conflict-exists = Mantido o arquivo local existente, que é diferente do Drive e não foi criado pelo Next GDrive: { $path }
 sync-skipped-shortcut = Atalho do Drive ignorado: { $path }
 sync-skipped-locked = Ignorado, o proprietário não permite download: { $path }
 sync-failed = Falhou: { $path }: { $error }
@@ -107,9 +108,11 @@ gui-sync-never = Ainda não sincronizado nesta sessão
 gui-syncing = Sincronizando…
 gui-sync-result = { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
 gui-report-conflicts = { $count ->
-    [one] 1 arquivo mantido com alterações feitas neste computador
-   *[other] { $count } arquivos mantidos com alterações feitas neste computador
+    [one] 1 arquivo local não foi substituído
+   *[other] { $count } arquivos locais não foram substituídos
 }
+gui-conflict-changed = Alterado neste computador
+gui-conflict-exists = Já existia um arquivo diferente aqui
 gui-report-failures = { $count ->
     [one] 1 item falhou
    *[other] { $count } itens falharam
