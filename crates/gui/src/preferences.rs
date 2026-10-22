@@ -3,6 +3,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 
+use crate::autostart;
 use crate::ctx::Ctx;
 
 /// App-wide settings: for now, where synced accounts live.
@@ -27,8 +28,25 @@ pub fn present(ctx: &Rc<Ctx>) {
         .description(i18n.tr("gui-sync-root-note"))
         .build();
     group.add(&root_row);
+    let autostart_row = adw::SwitchRow::builder()
+        .title(i18n.tr("gui-autostart"))
+        .subtitle(i18n.tr("gui-autostart-subtitle"))
+        .active(autostart::is_enabled())
+        .build();
+    let ctx_for_autostart = ctx.clone();
+    autostart_row.connect_active_notify(move |row| {
+        if let Err(e) = autostart::set_enabled(row.is_active()) {
+            ctx_for_autostart.toast(&e.to_string());
+        }
+    });
+    let background = adw::PreferencesGroup::builder()
+        .title(i18n.tr("gui-background-group"))
+        .build();
+    background.add(&autostart_row);
+
     let page = adw::PreferencesPage::new();
     page.add(&group);
+    page.add(&background);
     let dialog = adw::PreferencesDialog::new();
     dialog.add(&page);
 

@@ -23,6 +23,18 @@ sync-skipped-shortcut = Atalho do Drive ignorado: { $path }
 sync-skipped-locked = Ignorado, o proprietário não permite download: { $path }
 sync-failed = Falhou: { $path }: { $error }
 
+status-up-to-date = Atualizado
+status-checked-ago = { $minutes ->
+    [0] verificado agora
+    [one] verificado há 1 minuto
+   *[other] verificado há { $minutes } minutos
+}
+status-starting = Iniciando…
+status-checking = Verificando { $email }…
+status-syncing = Sincronizando { $email }: { $done } de { $total } arquivos
+status-paused = Sincronização pausada
+status-problem = Problema em { $email }: { $message }
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -75,6 +87,10 @@ cli-folder-deselected-removed = Pasta desmarcada. { $removed ->
 cli-daemon-about = Manter as contas sincronizadas em primeiro plano, sem interface gráfica
 cli-daemon-started = O Next GDrive está rodando e verifica o Google Drive a cada { $secs } segundos. Pressione Ctrl+C para parar.
 cli-daemon-stopped = Next GDrive encerrado.
+cli-status-about = Mostrar o que o Next GDrive está fazendo em segundo plano
+cli-status-not-running = O Next GDrive não está rodando em segundo plano. Abra o aplicativo ou execute "nextgdrive daemon".
+cli-sync-requested = Pedido enviado ao Next GDrive em segundo plano para sincronizar agora.
+cli-daemon-already-running = O Next GDrive já está rodando em segundo plano (o aplicativo na bandeja do sistema, ou outro "nextgdrive daemon").
 
 ## GUI
 
@@ -144,6 +160,15 @@ gui-deselect-kept = { $count ->
    *[other] { $count } arquivos mantidos porque foram alterados neste computador
 }
 gui-deselect-kept-files = Pasta desmarcada. Os arquivos foram mantidos e não serão mais atualizados.
+gui-background-group = Segundo plano
+gui-autostart = Iniciar com a sessão
+gui-autostart-subtitle = Manter os arquivos sincronizados pela bandeja do sistema, sem abrir a janela
+gui-host-elsewhere = Outro processo do Next GDrive (como "nextgdrive daemon") já está sincronizando em segundo plano.
+tray-open = Abrir Next GDrive
+tray-sync-now = Sincronizar agora
+tray-pause = Pausar sincronização
+tray-resume = Retomar sincronização
+tray-quit = Sair
 
 ## Errors
 
@@ -160,3 +185,4 @@ error-oauth-client-unreadable = Não foi possível ler o arquivo do cliente OAut
 error-invalid-sync-root = A pasta de sincronização precisa ser um caminho absoluto: { $path }
 error-not-a-folder = Não é uma pasta: { $id }
 error-sync-in-progress = Esta conta já está sendo sincronizada, por este ou por outro processo do Next GDrive.
+error-dbus = Não foi possível usar o barramento da sessão (D-Bus): { $details }

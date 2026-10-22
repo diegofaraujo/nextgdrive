@@ -1,6 +1,8 @@
 //! Composition root shared by the front-ends: builds the concrete adapters.
 //! Each failure is returned as a localized message, ready to show.
 
+pub mod host;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

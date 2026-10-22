@@ -8,6 +8,7 @@ use nextgdrive_i18n::Localizer;
 
 pub enum Command {
     Daemon,
+    Status,
     Account(AccountCommand),
     Config(ConfigCommand),
     Sync(SyncCommand),
@@ -92,6 +93,7 @@ fn command(i18n: &Localizer) -> clap::Command {
                 .action(ArgAction::Version)
                 .help(i18n.tr("cli-version")),
         )
+        .subcommand(clap::Command::new("status").about(i18n.tr("cli-status-about")))
         .subcommand(clap::Command::new("daemon").about(i18n.tr("cli-daemon-about")))
         .subcommand(
             group("account", "cli-account-about")
@@ -211,6 +213,7 @@ fn no_subcommand() -> ! {
 fn from_matches(matches: &ArgMatches) -> Command {
     match matches.subcommand() {
         Some(("daemon", _)) => Command::Daemon,
+        Some(("status", _)) => Command::Status,
         Some(("account", m)) => Command::Account(match m.subcommand() {
             Some(("list", _)) => AccountCommand::List,
             Some(("add", _)) => AccountCommand::Add,

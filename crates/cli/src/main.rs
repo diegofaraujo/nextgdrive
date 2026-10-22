@@ -5,13 +5,15 @@ mod cli;
 
 use std::io::{IsTerminal, Write};
 use std::process::{ExitCode, Stdio};
+use std::sync::Arc;
 
+use nextgdrive_adapter_dbus::Client;
 use nextgdrive_application::AppError;
-use nextgdrive_application::background::SyncEvent;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
 use nextgdrive_application::use_cases::{
     ConflictReason, LocalCopies, SkipReason, SyncProgress, SyncReport,
 };
+use nextgdrive_composition::host::{self, StartError, SyncHost};
 use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
@@ -41,6 +43,19 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     let app_error = |e: AppError| i18n.app_error(&e);
     match command {
         Command::Daemon => daemon(i18n).await?,
+        Command::Status => match Client::connect().await {
+            None => println!("{}", i18n.tr("cli-status-not-running")),
+            Some(client) => {
+                let status = client
+                    .status()
+                    .await
+                    .map_err(|e| i18n.tr_args("error-dbus", [("details", e.to_string().into())]))?;
+                println!("{}", host::describe(i18n, &status));
+                for (email, message) in status.errors.iter().skip(1) {
+                    println!("{email}: {message}");
+                }
+            }
+        },
         Command::Account(AccountCommand::List) => {
             let local = LocalServices::new(i18n)?;
             let list = local.list_accounts().execute().map_err(app_error)?;
@@ -161,6 +176,17 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
             );
         }
         Command::Sync(SyncCommand::Run { email }) => {
+            // Let the process running in the background do it, if there is one.
+            if email.is_none()
+                && let Some(client) = Client::connect().await
+            {
+                client
+                    .sync_now()
+                    .await
+                    .map_err(|e| i18n.tr_args("error-dbus", [("details", e.to_string().into())]))?;
+                println!("{}", i18n.tr("cli-sync-requested"));
+                return Ok(());
+            }
             let services = Services::new(i18n).await?;
             let accounts = match email {
                 Some(email) => vec![find_account(&services.local, &email, i18n)?],
@@ -308,61 +334,38 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     Ok(())
 }
 
-/// Keeps accounts in sync until interrupted.
+/// Runs background sync in the foreground until interrupted.
 async fn daemon(i18n: &Localizer) -> Result<(), String> {
     use tokio::signal::unix::{SignalKind, signal};
 
-    let app_error = |e: AppError| i18n.app_error(&e);
-    let services = Services::new(i18n).await?;
-    let background = services.background_sync();
-    let mut terminate = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
-    let on_event = |event: SyncEvent<'_>| match event {
-        SyncEvent::Started(account) => println!(
-            "{}",
-            i18n.tr_args(
-                "sync-started",
-                [("email", account.email.to_string().into())]
-            )
-        ),
-        SyncEvent::Finished(account, Ok(report)) => {
-            print_report(i18n, account, report);
+    let services = Arc::new(Services::new(i18n).await?);
+    let interval = services
+        .local
+        .get_settings()
+        .execute()
+        .map_err(|e| i18n.app_error(&e))?
+        .poll_interval_secs;
+    let log = Box::new(|line: String| println!("{line}"));
+    let host = match SyncHost::start(services, i18n.clone(), log).await {
+        Ok(host) => host,
+        Err(StartError::AlreadyRunning) => return Err(i18n.tr("cli-daemon-already-running")),
+        Err(StartError::Bus(details)) => {
+            return Err(i18n.tr_args("error-dbus", [("details", details.into())]));
         }
-        SyncEvent::Finished(account, Err(e)) | SyncEvent::CheckFailed(account, e) => {
-            eprintln!("{}: {}", account.email, i18n.app_error(e));
-        }
-        SyncEvent::UpToDate(_) | SyncEvent::Progress(..) => {}
-    };
-
-    let interval = |i18n: &Localizer| -> Result<u64, String> {
-        let settings = services
-            .local
-            .get_settings()
-            .execute()
-            .map_err(|e| i18n.app_error(&e))?;
-        Ok(settings.poll_interval_secs)
     };
     println!(
         "{}",
         i18n.tr_args(
             "cli-daemon-started",
-            [("secs", FluentValue::from(interval(i18n)?))]
+            [("secs", FluentValue::from(interval))]
         )
     );
-    loop {
-        // Dropping an unfinished sync is safe: partial downloads are
-        // discarded and the account lock is released.
-        tokio::select! {
-            result = background.tick(false, &on_event) => result.map_err(app_error)?,
-            _ = tokio::signal::ctrl_c() => break,
-            _ = terminate.recv() => break,
-        }
-        let pause = std::time::Duration::from_secs(interval(i18n)?);
-        tokio::select! {
-            () = tokio::time::sleep(pause) => {}
-            _ = tokio::signal::ctrl_c() => break,
-            _ = terminate.recv() => break,
-        }
+    let mut terminate = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
     }
+    drop(host);
     println!("{}", i18n.tr("cli-daemon-stopped"));
     Ok(())
 }

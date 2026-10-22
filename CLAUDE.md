@@ -37,9 +37,10 @@ Clean Architecture + Hexagonal (Ports & Adapters) in a Cargo workspace with one 
 | `adapter-google` | `Authenticator` (OAuth 2.0 for installed apps: PKCE + loopback server on `127.0.0.1:<random port>`) and `DriveService` (Drive API v3). | `domain`, `application` |
 | `adapter-keyring` | `CredentialStore` in the Secret Service keyring via `oo7`. Only refresh tokens are stored, never on disk. | `domain`, `application` |
 | `i18n` | Fluent translations shared by GUI and CLI; maps `AppError`/`DomainError` to messages; formats sizes and quotas. | `domain`, `application` |
-| `composition` | Shared composition root: builds the concrete adapters (`Services`) and localizes setup errors. | everything except front-ends |
+| `adapter-dbus` | Session-bus service `io.github.diegofaraujo.NextGDrive.Sync` (zbus) exposed by whichever process runs background sync, and the `Client` the CLI uses. Owning the bus name means "I run background sync". | — |
+| `composition` | Shared composition root: builds the concrete adapters (`Services`), localizes setup errors, and `host::SyncHost` (background-sync loop with status, sync-now/pause/resume, served on D-Bus). | everything except front-ends |
 | `cli` | Binary `nextgdrive` (clap). | `composition`, inner layers |
-| `gui` | Binary `nextgdrive-gui` (GTK4 + libadwaita, app id `io.github.diegofaraujo.NextGDrive`). | `composition`, inner layers |
+| `gui` | Binary `nextgdrive-gui` (GTK4 + libadwaita, app id `io.github.diegofaraujo.NextGDrive`): window plus system tray icon (`ksni`, StatusNotifierItem). | `composition`, inner layers |
 
 Patterns to follow:
 
@@ -62,6 +63,8 @@ Download-only for now (upload is the next phase). Invariants that tests in that 
 - Downloads are verified against Drive's MD5 before replacing anything. Local mtimes are set to Drive's `modifiedTime`.
 - Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`. The two folder names are translated once and pinned in `settings.toml`.
 - Google Docs/Sheets/etc. become small `.html` pages that redirect to the document (`.desktop` links do not open from COSMIC Files or recent Nautilus). Shortcuts are rewritten, never moved, when their name or format changes. Drive shortcuts and non-downloadable files are skipped and reported.
+
+Process model: exactly one process per session runs background sync, by hosting `SyncHost` and owning the D-Bus name. Normally that is the GUI: it starts `SyncHost`, shows the tray icon, hides the window on close (`--background` starts hidden; the XDG autostart entry toggled in Preferences uses it), and only **Quit** in the tray stops syncing. On headless machines `nextgdrive daemon` hosts it instead. `nextgdrive status` and `nextgdrive sync run` (without an email) talk to the host over D-Bus when one runs, and otherwise work standalone.
 
 Background sync (`application/src/background.rs`): `BackgroundSync::tick` reads Drive's change feed per account and runs `SyncAccount` when something changed remotely, the selection changed, or `FULL_SYNC_INTERVAL` (15 min) passed (the feed cannot report local deletions). The feed cursor is saved only after a successful sync. `SyncAccount` and `ChangeSelection::deselect` hold a per-account lock (`SyncStateStore::try_lock`; a `flock`ed file next to the SQLite DB), so the tray app, `nextgdrive daemon` and one-off CLI runs never sync the same account at once.
 

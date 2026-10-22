@@ -23,6 +23,18 @@ sync-skipped-shortcut = Acceso directo de Drive omitido: { $path }
 sync-skipped-locked = Omitido, el propietario no permite descargarlo: { $path }
 sync-failed = Falló: { $path }: { $error }
 
+status-up-to-date = Actualizado
+status-checked-ago = { $minutes ->
+    [0] comprobado ahora
+    [one] comprobado hace 1 minuto
+   *[other] comprobado hace { $minutes } minutos
+}
+status-starting = Iniciando…
+status-checking = Comprobando { $email }…
+status-syncing = Sincronizando { $email }: { $done } de { $total } archivos
+status-paused = Sincronización en pausa
+status-problem = Problema con { $email }: { $message }
+
 ## CLI
 
 cli-about = Sincroniza tus cuentas de Google Drive con carpetas locales.
@@ -75,6 +87,10 @@ cli-folder-deselected-removed = Carpeta deseleccionada. { $removed ->
 cli-daemon-about = Mantener las cuentas sincronizadas en primer plano, sin interfaz gráfica
 cli-daemon-started = Next GDrive está en ejecución y revisa Google Drive cada { $secs } segundos. Pulsa Ctrl+C para detenerlo.
 cli-daemon-stopped = Next GDrive se detuvo.
+cli-status-about = Mostrar qué está haciendo Next GDrive en segundo plano
+cli-status-not-running = Next GDrive no se está ejecutando en segundo plano. Abre la aplicación o ejecuta "nextgdrive daemon".
+cli-sync-requested = Se pidió al Next GDrive en segundo plano que sincronice ahora.
+cli-daemon-already-running = Next GDrive ya se está ejecutando en segundo plano (la aplicación en la bandeja del sistema u otro "nextgdrive daemon").
 
 ## GUI
 
@@ -144,6 +160,15 @@ gui-deselect-kept = { $count ->
    *[other] { $count } archivos conservados porque cambiaron en este equipo
 }
 gui-deselect-kept-files = Carpeta deseleccionada. Sus archivos se conservaron y ya no se actualizarán.
+gui-background-group = Segundo plano
+gui-autostart = Iniciar con la sesión
+gui-autostart-subtitle = Mantener los archivos sincronizados desde la bandeja del sistema, sin abrir la ventana
+gui-host-elsewhere = Otro proceso de Next GDrive (como "nextgdrive daemon") ya está sincronizando en segundo plano.
+tray-open = Abrir Next GDrive
+tray-sync-now = Sincronizar ahora
+tray-pause = Pausar sincronización
+tray-resume = Reanudar sincronización
+tray-quit = Salir
 
 ## Errors
 
@@ -160,3 +185,4 @@ error-oauth-client-unreadable = No se pudo leer el archivo del cliente OAuth { $
 error-invalid-sync-root = La carpeta de sincronización debe ser una ruta absoluta: { $path }
 error-not-a-folder = No es una carpeta: { $id }
 error-sync-in-progress = Esta cuenta ya se está sincronizando, en este u otro proceso de Next GDrive.
+error-dbus = No se pudo usar el bus de la sesión (D-Bus): { $details }

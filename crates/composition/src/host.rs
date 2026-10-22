@@ -1,0 +1,299 @@
+//! Background sync as a long-running service: the loop shared by the tray
+//! app and `nextgdrive daemon`, controllable in-process and over D-Bus.
+
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+use nextgdrive_adapter_dbus::{
+    HostControl, HostStatus, STATE_IDLE, STATE_PAUSED, STATE_SYNCING, ServeError,
+};
+use nextgdrive_application::AppError;
+use nextgdrive_application::background::SyncEvent;
+use nextgdrive_i18n::{FluentValue, Localizer};
+use tokio::sync::{mpsc, watch};
+
+use crate::Services;
+
+#[derive(Debug, Clone, Copy)]
+enum Command {
+    SyncNow,
+    Pause,
+    Resume,
+}
+
+/// Translated line describing something background sync did, for logs.
+pub type LogSink = Box<dyn Fn(String) + Send + Sync>;
+
+/// Handle to the running background sync. Dropping it stops the sync.
+pub struct SyncHost {
+    control: Arc<Control>,
+    task: tokio::task::JoinHandle<()>,
+    _bus: zbus::Connection,
+}
+
+/// Shared with the D-Bus service and the loop.
+struct Control {
+    commands: mpsc::UnboundedSender<Command>,
+    status: watch::Receiver<HostStatus>,
+}
+
+impl HostControl for Control {
+    fn status(&self) -> HostStatus {
+        self.status.borrow().clone()
+    }
+
+    fn sync_now(&self) {
+        let _ = self.commands.send(Command::SyncNow);
+    }
+
+    fn pause(&self) {
+        let _ = self.commands.send(Command::Pause);
+    }
+
+    fn resume(&self) {
+        let _ = self.commands.send(Command::Resume);
+    }
+}
+
+#[derive(Debug)]
+pub enum StartError {
+    /// Another process (tray app or daemon) already runs background sync.
+    AlreadyRunning,
+    Bus(String),
+}
+
+impl SyncHost {
+    /// Starts background sync on the current Tokio runtime and publishes it on
+    /// D-Bus. Only one process per session may run it.
+    pub async fn start(
+        services: Arc<Services>,
+        i18n: Localizer,
+        log: LogSink,
+    ) -> Result<Self, StartError> {
+        let (commands, receiver) = mpsc::unbounded_channel();
+        let (status_tx, status) = watch::channel(HostStatus {
+            state: STATE_IDLE.into(),
+            ..HostStatus::default()
+        });
+        let control = Arc::new(Control { commands, status });
+        let bus = nextgdrive_adapter_dbus::serve(control.clone())
+            .await
+            .map_err(|e| match e {
+                ServeError::AlreadyRunning => StartError::AlreadyRunning,
+                ServeError::Bus(e) => StartError::Bus(e.to_string()),
+            })?;
+        let task = tokio::spawn(run(services, i18n, log, receiver, status_tx));
+        Ok(Self {
+            control,
+            task,
+            _bus: bus,
+        })
+    }
+
+    pub fn status(&self) -> watch::Receiver<HostStatus> {
+        self.control.status.clone()
+    }
+
+    pub fn sync_now(&self) {
+        self.control.sync_now();
+    }
+
+    pub fn pause(&self) {
+        self.control.pause();
+    }
+
+    pub fn resume(&self) {
+        self.control.resume();
+    }
+}
+
+impl Drop for SyncHost {
+    /// Cancelling mid-sync is safe: partial downloads are discarded and the
+    /// account lock is released.
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+fn unix_now() -> i64 {
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    i64::try_from(secs).unwrap_or(i64::MAX)
+}
+
+async fn run(
+    services: Arc<Services>,
+    i18n: Localizer,
+    log: LogSink,
+    mut commands: mpsc::UnboundedReceiver<Command>,
+    status: watch::Sender<HostStatus>,
+) {
+    let background = services.background_sync();
+    let mut paused = false;
+    let mut force = false;
+    loop {
+        if !paused {
+            let errors = Mutex::new(Vec::new());
+            let finished = {
+                let on_event =
+                    |event: SyncEvent<'_>| on_event(&i18n, &log, &status, &errors, event);
+                let tick = background.tick(std::mem::take(&mut force), &on_event);
+                tokio::pin!(tick);
+                // Commands arriving mid-sync: pausing cancels it, the rest wait.
+                loop {
+                    tokio::select! {
+                        result = &mut tick => break Some(result),
+                        command = commands.recv() => match command {
+                            None => return,
+                            Some(Command::Pause) => {
+                                paused = true;
+                                break None;
+                            }
+                            Some(Command::SyncNow) => force = true,
+                            Some(Command::Resume) => {}
+                        },
+                    }
+                }
+            };
+            let mut errors = errors.into_inner().unwrap_or_default();
+            if let Some(Err(e)) = &finished {
+                errors.push((String::new(), i18n.app_error(e)));
+            }
+            status.send_modify(|s| {
+                s.state = if paused { STATE_PAUSED } else { STATE_IDLE }.into();
+                s.account.clear();
+                if finished.is_some() {
+                    s.last_check = unix_now();
+                    s.errors = errors;
+                }
+            });
+        }
+
+        let interval = services
+            .local
+            .get_settings()
+            .execute()
+            .map(|s| s.poll_interval_secs)
+            .unwrap_or(nextgdrive_domain::Settings::DEFAULT_POLL_INTERVAL_SECS);
+        // A forced sync requested during the last one runs right away.
+        if force && !paused {
+            continue;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(Duration::from_secs(interval)), if !paused => {}
+            command = commands.recv() => match command {
+                None => return,
+                Some(Command::SyncNow) => {
+                    force = true;
+                    if paused {
+                        // Syncing now implies resuming.
+                        paused = false;
+                    }
+                }
+                Some(Command::Pause) => {
+                    paused = true;
+                    status.send_modify(|s| s.state = STATE_PAUSED.into());
+                }
+                Some(Command::Resume) => {
+                    paused = false;
+                    force = true;
+                }
+            },
+        }
+    }
+}
+
+fn on_event(
+    i18n: &Localizer,
+    log: &LogSink,
+    status: &watch::Sender<HostStatus>,
+    errors: &Mutex<Vec<(String, String)>>,
+    event: SyncEvent<'_>,
+) {
+    let push_error = |email: &str, e: &AppError| {
+        if let Ok(mut errors) = errors.lock() {
+            errors.push((email.to_owned(), i18n.app_error(e)));
+        }
+    };
+    match event {
+        SyncEvent::Started(account) => {
+            status.send_modify(|s| {
+                s.state = STATE_SYNCING.into();
+                s.account = account.email.to_string();
+                (s.files_done, s.files_total, s.bytes_done, s.bytes_total) = (0, 0, 0, 0);
+            });
+            log(i18n.tr_args(
+                "sync-started",
+                [("email", account.email.to_string().into())],
+            ));
+        }
+        SyncEvent::Progress(_, p) => status.send_modify(|s| {
+            s.files_done = p.files_done as u64;
+            s.files_total = p.files_total as u64;
+            s.bytes_done = p.bytes_done;
+            s.bytes_total = p.bytes_total;
+        }),
+        SyncEvent::Finished(account, Ok(report)) => log(i18n.tr_args(
+            "sync-summary",
+            [
+                ("email", account.email.to_string().into()),
+                ("downloaded", FluentValue::from(report.downloaded)),
+                ("bytes", i18n.bytes(report.downloaded_bytes).into()),
+                ("moved", FluentValue::from(report.moved)),
+                ("removed", FluentValue::from(report.removed)),
+            ],
+        )),
+        // Someone else (e.g. a one-off `nextgdrive sync run`) is on it.
+        SyncEvent::Finished(_, Err(AppError::SyncInProgress(_))) => {}
+        SyncEvent::Finished(account, Err(e)) | SyncEvent::CheckFailed(account, e) => {
+            push_error(account.email.as_str(), e);
+            log(format!("{}: {}", account.email, i18n.app_error(e)));
+        }
+        SyncEvent::UpToDate(_) => {}
+    }
+}
+
+/// One-line, translated summary of a status, as shown in the tray and by
+/// `nextgdrive status`.
+pub fn describe(i18n: &Localizer, status: &HostStatus) -> String {
+    let line = match status.state.as_str() {
+        STATE_PAUSED => i18n.tr("status-paused"),
+        STATE_SYNCING if status.files_total == 0 => i18n.tr_args(
+            "status-checking",
+            [("email", status.account.clone().into())],
+        ),
+        STATE_SYNCING => i18n.tr_args(
+            "status-syncing",
+            [
+                ("email", status.account.clone().into()),
+                ("done", FluentValue::from(status.files_done)),
+                ("total", FluentValue::from(status.files_total)),
+            ],
+        ),
+        _ if status.last_check == 0 => i18n.tr("status-starting"),
+        _ => {
+            let minutes = (unix_now() - status.last_check).max(0) / 60;
+            let ago = i18n.tr_args(
+                "status-checked-ago",
+                [("minutes", FluentValue::from(minutes))],
+            );
+            format!("{} · {ago}", i18n.tr("status-up-to-date"))
+        }
+    };
+    match status.errors.first() {
+        Some((email, message)) if !email.is_empty() => {
+            let problem = i18n.tr_args(
+                "status-problem",
+                [
+                    ("email", email.clone().into()),
+                    ("message", message.clone().into()),
+                ],
+            );
+            format!("{line}\n{problem}")
+        }
+        Some((_, message)) => format!("{line}\n{message}"),
+        None => line,
+    }
+}
