@@ -3,10 +3,12 @@
 
 mod cli;
 
+use std::io::{IsTerminal, Write};
 use std::process::{ExitCode, Stdio};
 
 use nextgdrive_application::AppError;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
+use nextgdrive_application::use_cases::{SkipReason, SyncProgress, SyncReport};
 use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
@@ -154,6 +156,58 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
                 )
             );
         }
+        Command::Sync(SyncCommand::Run { email }) => {
+            let services = Services::new(i18n).await?;
+            let accounts = match email {
+                Some(email) => vec![find_account(&services.local, &email, i18n)?],
+                None => services
+                    .local
+                    .list_accounts()
+                    .execute()
+                    .map_err(app_error)?,
+            };
+            if accounts.is_empty() {
+                println!("{}", i18n.tr("cli-account-list-empty"));
+            }
+            let settings = services.local.get_settings().execute().map_err(app_error)?;
+            let mut failed = false;
+            for account in accounts {
+                if settings.selection(&account.id).next().is_none() {
+                    println!(
+                        "{}",
+                        i18n.tr_args(
+                            "cli-sync-nothing-selected",
+                            [("email", account.email.to_string().into())]
+                        )
+                    );
+                    continue;
+                }
+                let show_progress = std::io::stderr().is_terminal();
+                let on_progress = |p: &SyncProgress| {
+                    if show_progress && p.files_total > 0 {
+                        eprint!("\r\x1b[2K{}", progress_line(i18n, p));
+                        let _ = std::io::stderr().flush();
+                    }
+                };
+                let result = services
+                    .sync_account()
+                    .execute(&account, &on_progress)
+                    .await;
+                if show_progress {
+                    eprint!("\r\x1b[2K");
+                }
+                match result {
+                    Ok(report) => failed |= print_report(i18n, &account, &report),
+                    Err(e) => {
+                        failed = true;
+                        eprintln!("{}: {}", account.email, i18n.app_error(&e));
+                    }
+                }
+            }
+            if failed {
+                return Err(String::new());
+            }
+        }
         Command::Sync(SyncCommand::Folders { email, folder }) => {
             let services = Services::new(i18n).await?;
             let account = find_account(&services.local, &email, i18n)?;
@@ -211,6 +265,62 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn progress_line(i18n: &Localizer, p: &SyncProgress) -> String {
+    i18n.tr_args(
+        "cli-sync-progress",
+        [
+            ("done", FluentValue::from(p.files_done)),
+            ("total", FluentValue::from(p.files_total)),
+            ("bytes_done", i18n.bytes(p.bytes_done).into()),
+            ("bytes_total", i18n.bytes(p.bytes_total).into()),
+        ],
+    )
+}
+
+/// Prints the outcome of an account's sync. Returns whether anything failed.
+fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> bool {
+    let path = |p: &std::path::Path| FluentValue::from(p.display().to_string());
+    for conflict in &report.conflicts {
+        eprintln!(
+            "{}",
+            i18n.tr_args("sync-conflict", [("path", path(conflict))])
+        );
+    }
+    for (skipped, reason) in &report.skipped {
+        let id = match reason {
+            SkipReason::Shortcut => "sync-skipped-shortcut",
+            SkipReason::NotDownloadable => "sync-skipped-locked",
+        };
+        println!("{}", i18n.tr_args(id, [("path", path(skipped))]));
+    }
+    for (failed, error) in &report.failures {
+        eprintln!(
+            "{}",
+            i18n.tr_args(
+                "sync-failed",
+                [
+                    ("path", path(failed)),
+                    ("error", i18n.app_error(error).into())
+                ]
+            )
+        );
+    }
+    println!(
+        "{}",
+        i18n.tr_args(
+            "sync-summary",
+            [
+                ("email", account.email.to_string().into()),
+                ("downloaded", FluentValue::from(report.downloaded)),
+                ("bytes", i18n.bytes(report.downloaded_bytes).into()),
+                ("moved", FluentValue::from(report.moved)),
+                ("removed", FluentValue::from(report.removed)),
+            ]
+        )
+    );
+    !report.failures.is_empty()
 }
 
 fn find_account(local: &LocalServices, email: &str, i18n: &Localizer) -> Result<Account, String> {

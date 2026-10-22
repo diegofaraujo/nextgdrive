@@ -14,6 +14,11 @@ auth-callback-failure = No se completó el inicio de sesión. Vuelve a Next GDri
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = Mi unidad
 folder-shared-drives = Unidades compartidas
+sync-summary = { $email }: { $downloaded } descargados ({ $bytes }), { $moved } movidos, { $removed } eliminados
+sync-conflict = Se conservó la versión local, que cambió en este equipo: { $path }
+sync-skipped-shortcut = Acceso directo de Drive omitido: { $path }
+sync-skipped-locked = Omitido, el propietario no permite descargarlo: { $path }
+sync-failed = Falló: { $path }: { $error }
 
 ## CLI
 
@@ -53,8 +58,12 @@ cli-settings-selection = { $email }: { $count ->
 }
 cli-sync-root-changed = Carpeta de sincronización cambiada a { $path }. Los archivos ya sincronizados no se movieron.
 cli-folder-selected = Carpeta seleccionada. Se descargará en la próxima sincronización.
-cli-folder-deselected = Carpeta deseleccionada. Se conservaron las copias locales.
+cli-folder-deselected = Carpeta deseleccionada. Se conservaron las copias locales y ya no se actualizarán.
 cli-no-folders = No hay subcarpetas.
+cli-sync-run-about = Descargar las carpetas seleccionadas de una o de todas las cuentas
+cli-sync-run-email = Solo esta cuenta (predeterminado: todas)
+cli-sync-progress = { $done } de { $total } archivos, { $bytes_done } de { $bytes_total }
+cli-sync-nothing-selected = { $email }: nada seleccionado. Elige carpetas con "nextgdrive sync select".
 
 ## GUI
 

@@ -13,6 +13,18 @@ const MAX_NAME_BYTES: usize = 255;
 /// Extension of the shortcut files that stand in for Google Docs.
 pub const GOOGLE_DOC_EXTENSION: &str = "desktop";
 
+/// Contents of the file that stands in for a Google Doc: a freedesktop.org
+/// link that opens the document in the browser.
+pub fn google_doc_shortcut(name: &str, url: &str) -> String {
+    // Line breaks would end the key early and inject other keys.
+    let clean = |value: &str| value.replace(['\n', '\r'], " ");
+    format!(
+        "[Desktop Entry]\nType=Link\nName={}\nURL={}\nIcon=text-html\n",
+        clean(name),
+        clean(url)
+    )
+}
+
 /// Valid local file name for an item, before resolving clashes between siblings.
 pub fn local_name(name: &str, kind: &ItemKind) -> String {
     let mut local: String = name
@@ -33,7 +45,9 @@ pub fn local_name(name: &str, kind: &ItemKind) -> String {
 /// Assigns unique local names to the items of one folder. Clashing names get a
 /// numeric suffix (`report (2).pdf`). Deterministic: the same input always
 /// yields the same names, so items do not swap names between syncs.
-pub fn assign_names<'a>(items: impl IntoIterator<Item = (&'a DriveItemId, String)>) -> BTreeMap<DriveItemId, String> {
+pub fn assign_names<'a>(
+    items: impl IntoIterator<Item = (&'a DriveItemId, String)>,
+) -> BTreeMap<DriveItemId, String> {
     let mut by_name: BTreeMap<String, Vec<&DriveItemId>> = BTreeMap::new();
     for (id, name) in items {
         by_name.entry(name).or_default().push(id);
@@ -68,7 +82,10 @@ fn with_suffix(name: &str, n: u32) -> String {
         Some(dot) if dot > 0 => name.split_at(dot),
         _ => (name, ""),
     };
-    let stem = truncate(stem, MAX_NAME_BYTES.saturating_sub(suffix.len() + ext.len()));
+    let stem = truncate(
+        stem,
+        MAX_NAME_BYTES.saturating_sub(suffix.len() + ext.len()),
+    );
     format!("{stem}{suffix}{ext}")
 }
 
@@ -107,8 +124,17 @@ mod tests {
 
     #[test]
     fn google_docs_become_desktop_files() {
-        let doc = ItemKind::GoogleDoc { url: "https://docs.google.com/x".into() };
+        let doc = ItemKind::GoogleDoc {
+            url: "https://docs.google.com/x".into(),
+        };
         assert_eq!(local_name("Budget", &doc), "Budget.desktop");
+    }
+
+    #[test]
+    fn shortcut_cannot_inject_keys() {
+        let shortcut = google_doc_shortcut("Evil\nExec=rm -rf ~", "https://docs.google.com/d/1");
+        assert!(shortcut.contains("Name=Evil Exec=rm -rf ~\n"));
+        assert!(!shortcut.lines().any(|line| line.starts_with("Exec=")));
     }
 
     #[test]
