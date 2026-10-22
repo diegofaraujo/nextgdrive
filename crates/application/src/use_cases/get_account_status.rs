@@ -1,43 +1,35 @@
 use nextgdrive_domain::Account;
 
-use crate::AppError;
 use crate::ports::{
     AccountRepository, Authenticator, CredentialStore, DriveAccountInfo, DriveService,
 };
+use crate::{AppError, TokenProvider};
 
 /// Fetches an account's current details (including storage quota) from Google
 /// Drive, and updates the stored account if its email or name changed.
-pub struct GetAccountStatus<'a, A, D, C, R> {
-    auth: &'a A,
+pub struct GetAccountStatus<'a, A, C, D, R> {
+    tokens: &'a TokenProvider<A, C>,
     drive: &'a D,
-    credentials: &'a C,
     accounts: &'a R,
 }
 
-impl<'a, A, D, C, R> GetAccountStatus<'a, A, D, C, R>
+impl<'a, A, C, D, R> GetAccountStatus<'a, A, C, D, R>
 where
     A: Authenticator,
-    D: DriveService,
     C: CredentialStore,
+    D: DriveService,
     R: AccountRepository,
 {
-    pub fn new(auth: &'a A, drive: &'a D, credentials: &'a C, accounts: &'a R) -> Self {
+    pub fn new(tokens: &'a TokenProvider<A, C>, drive: &'a D, accounts: &'a R) -> Self {
         Self {
-            auth,
+            tokens,
             drive,
-            credentials,
             accounts,
         }
     }
 
     pub async fn execute(&self, account: &Account) -> Result<DriveAccountInfo, AppError> {
-        let refresh = self
-            .credentials
-            .load(&account.id)
-            .await
-            .map_err(AppError::Credentials)?
-            .ok_or_else(|| AppError::MissingCredentials(account.email.clone()))?;
-        let access = self.auth.refresh(&refresh).await.map_err(AppError::Auth)?;
+        let access = self.tokens.access_token(account).await?;
         let info = self
             .drive
             .account_info(&access)
@@ -66,30 +58,21 @@ mod tests {
             display_name: Some("Ana".into()),
             ..stored.clone()
         };
-        let (auth, drive) = (FakeAuth, FakeDrive::new(current.clone()));
-        let credentials = InMemoryCredentials::with_token("1", FakeAuth::REFRESH_TOKEN);
-        let repo = InMemoryAccounts::with([stored.clone()]);
+        let tokens = TokenProvider::new(
+            FakeAuth::default(),
+            InMemoryCredentials::with_token("1", FakeAuth::REFRESH_TOKEN),
+        );
+        let (drive, repo) = (
+            FakeDrive::new(current.clone()),
+            InMemoryAccounts::with([stored.clone()]),
+        );
 
-        let info = GetAccountStatus::new(&auth, &drive, &credentials, &repo)
+        let info = GetAccountStatus::new(&tokens, &drive, &repo)
             .execute(&stored)
             .await
             .unwrap();
 
         assert_eq!(info.quota, FakeDrive::QUOTA);
         assert_eq!(repo.list().unwrap(), [current]);
-    }
-
-    #[tokio::test]
-    async fn fails_without_credentials() {
-        let (auth, drive) = (FakeAuth, FakeDrive::new(account("1", "ana@x.com")));
-        let (credentials, repo) = (InMemoryCredentials::default(), InMemoryAccounts::default());
-
-        let result = GetAccountStatus::new(&auth, &drive, &credentials, &repo)
-            .execute(&account("1", "ana@x.com"))
-            .await;
-
-        assert!(
-            matches!(result, Err(AppError::MissingCredentials(e)) if e.as_str() == "ana@x.com")
-        );
     }
 }

@@ -89,6 +89,13 @@ impl Localizer {
                 "error-missing-credentials",
                 [("email", email.to_string().into())],
             ),
+            AppError::InvalidSyncRoot(path) => self.tr_args(
+                "error-invalid-sync-root",
+                [("path", path.display().to_string().into())],
+            ),
+            AppError::NotAFolder(id) => {
+                self.tr_args("error-not-a-folder", [("id", id.to_string().into())])
+            }
             AppError::Storage(e) => details("error-storage", e),
             AppError::Auth(e) => details("error-auth", e),
             AppError::Credentials(e) => details("error-credentials", e),

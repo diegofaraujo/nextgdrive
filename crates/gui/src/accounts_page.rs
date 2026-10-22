@@ -80,7 +80,7 @@ where
 
 impl AccountsPage {
     fn refresh(self: &Rc<Self>) {
-        match self.services.list_accounts().execute() {
+        match self.services.local.list_accounts().execute() {
             Err(e) => self.show_status(
                 "dialog-error-symbolic",
                 &self.i18n.tr("gui-load-error-title"),

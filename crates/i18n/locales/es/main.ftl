@@ -11,6 +11,10 @@ quota-used-unlimited = { $used } usados
 auth-callback-success = Has iniciado sesión. Puedes cerrar esta pestaña y volver a Next GDrive.
 auth-callback-failure = No se completó el inicio de sesión. Vuelve a Next GDrive e inténtalo de nuevo.
 
+# Folders created inside each account folder. Chosen once, on first use.
+folder-my-drive = Mi unidad
+folder-shared-drives = Unidades compartidas
+
 ## CLI
 
 cli-about = Sincroniza tus cuentas de Google Drive con carpetas locales.
@@ -30,6 +34,27 @@ cli-account-status-email = Solo esta cuenta (predeterminado: todas)
 cli-account-add-open-url = Abre esta dirección en tu navegador para iniciar sesión:
 cli-account-add-waiting = Esperando a que inicies sesión…
 cli-account-list-empty = No hay cuentas vinculadas.
+cli-config-about = Mostrar o cambiar la configuración
+cli-config-show-about = Mostrar la configuración actual
+cli-config-sync-root-about = Cambiar la carpeta que contiene las cuentas sincronizadas
+cli-config-sync-root-path = Nueva carpeta de sincronización
+cli-sync-about = Elegir qué sincronizar
+cli-sync-folders-about = Listar las unidades, o las subcarpetas de una carpeta, marcando las seleccionadas con [x]
+cli-sync-folders-folder = Id de la carpeta (predeterminado: listar las unidades de la cuenta)
+cli-sync-select-about = Sincronizar una carpeta y todo su contenido
+cli-sync-deselect-about = Dejar de sincronizar una carpeta
+cli-sync-folder-id = Id de la carpeta o unidad, como lo muestra "sync folders"
+cli-account-email = Correo de la cuenta
+cli-settings-sync-root = Carpeta de sincronización: { $path }
+cli-settings-selection = { $email }: { $count ->
+    [0] nada seleccionado
+    [one] 1 carpeta seleccionada
+   *[other] { $count } carpetas seleccionadas
+}
+cli-sync-root-changed = Carpeta de sincronización cambiada a { $path }. Los archivos ya sincronizados no se movieron.
+cli-folder-selected = Carpeta seleccionada. Se descargará en la próxima sincronización.
+cli-folder-deselected = Carpeta deseleccionada. Se conservaron las copias locales.
+cli-no-folders = No hay subcarpetas.
 
 ## GUI
 
@@ -61,3 +86,5 @@ error-credentials = No se pudo acceder al llavero del sistema: { $details }
 error-drive = Falló la solicitud a Google Drive: { $details }
 error-oauth-client-missing = El cliente OAuth de Google no está configurado. Guarda el archivo JSON descargado de Google Cloud Console como { $path }, o define { $id_var } y { $secret_var }.
 error-oauth-client-unreadable = No se pudo leer el archivo del cliente OAuth { $path }: { $details }
+error-invalid-sync-root = La carpeta de sincronización debe ser una ruta absoluta: { $path }
+error-not-a-folder = No es una carpeta: { $id }

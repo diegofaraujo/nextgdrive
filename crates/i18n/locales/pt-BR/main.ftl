@@ -11,6 +11,10 @@ quota-used-unlimited = { $used } usados
 auth-callback-success = Login concluído. Você pode fechar esta aba e voltar ao Next GDrive.
 auth-callback-failure = O login não foi concluído. Volte ao Next GDrive e tente novamente.
 
+# Folders created inside each account folder. Chosen once, on first use.
+folder-my-drive = Meu Drive
+folder-shared-drives = Drives compartilhados
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -30,6 +34,27 @@ cli-account-status-email = Apenas esta conta (padrão: todas)
 cli-account-add-open-url = Abra este endereço no navegador para fazer login:
 cli-account-add-waiting = Aguardando o login…
 cli-account-list-empty = Nenhuma conta vinculada.
+cli-config-about = Mostrar ou alterar configurações
+cli-config-show-about = Mostrar as configurações atuais
+cli-config-sync-root-about = Alterar a pasta que contém as contas sincronizadas
+cli-config-sync-root-path = Nova pasta de sincronização
+cli-sync-about = Escolher o que sincronizar
+cli-sync-folders-about = Listar os drives, ou as subpastas de uma pasta, marcando as selecionadas com [x]
+cli-sync-folders-folder = Id da pasta (padrão: listar os drives da conta)
+cli-sync-select-about = Sincronizar uma pasta e tudo o que há dentro dela
+cli-sync-deselect-about = Parar de sincronizar uma pasta
+cli-sync-folder-id = Id da pasta ou do drive, como mostrado por "sync folders"
+cli-account-email = E-mail da conta
+cli-settings-sync-root = Pasta de sincronização: { $path }
+cli-settings-selection = { $email }: { $count ->
+    [0] nada selecionado
+    [one] 1 pasta selecionada
+   *[other] { $count } pastas selecionadas
+}
+cli-sync-root-changed = Pasta de sincronização alterada para { $path }. Os arquivos já sincronizados não foram movidos.
+cli-folder-selected = Pasta selecionada. Ela será baixada na próxima sincronização.
+cli-folder-deselected = Pasta desmarcada. As cópias locais foram mantidas.
+cli-no-folders = Nenhuma subpasta.
 
 ## GUI
 
@@ -61,3 +86,5 @@ error-credentials = Não foi possível acessar o chaveiro do sistema: { $details
 error-drive = Falha na requisição ao Google Drive: { $details }
 error-oauth-client-missing = O cliente OAuth do Google não está configurado. Salve o arquivo JSON baixado do Google Cloud Console como { $path }, ou defina { $id_var } e { $secret_var }.
 error-oauth-client-unreadable = Não foi possível ler o arquivo do cliente OAuth { $path }: { $details }
+error-invalid-sync-root = A pasta de sincronização precisa ser um caminho absoluto: { $path }
+error-not-a-folder = Não é uma pasta: { $id }

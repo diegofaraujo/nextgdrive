@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use nextgdrive_domain::{Account, StorageQuota};
+use nextgdrive_domain::{Account, Drive, DriveItem, DriveItemId, StorageQuota};
 
 use super::{AccessToken, PortError};
 
@@ -17,4 +17,23 @@ pub trait DriveService: Sync {
         &self,
         token: &AccessToken,
     ) -> impl Future<Output = Result<DriveAccountInfo, PortError>> + Send;
+
+    /// My Drive first, then the shared drives the account can access.
+    fn drives(
+        &self,
+        token: &AccessToken,
+    ) -> impl Future<Output = Result<Vec<Drive>, PortError>> + Send;
+
+    /// Items directly inside a folder, excluding trashed ones.
+    fn children(
+        &self,
+        token: &AccessToken,
+        folder: &DriveItemId,
+    ) -> impl Future<Output = Result<Vec<DriveItem>, PortError>> + Send;
+
+    fn item(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+    ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
 }

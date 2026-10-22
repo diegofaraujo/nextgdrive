@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+humantime = "2.4.0"
 nextgdrive-application = { version = "0.1.0", path = "../application" }
 nextgdrive-domain = { version = "0.1.0", path = "../domain" }
 oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest", "rustls-tls"] }
