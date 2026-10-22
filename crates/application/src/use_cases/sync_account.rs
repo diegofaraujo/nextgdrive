@@ -30,13 +30,32 @@ pub struct SyncReport {
     pub downloaded_bytes: u64,
     pub moved: usize,
     pub removed: usize,
-    /// Local paths left untouched because they changed locally (or were not
-    /// created by Next GDrive) and differ from Drive.
-    pub conflicts: Vec<PathBuf>,
+    /// Local files left untouched because they differ from Drive.
+    pub conflicts: Vec<Conflict>,
     /// Drive items that have no local counterpart.
     pub skipped: Vec<(PathBuf, SkipReason)>,
     /// Items that failed; the rest of the sync went on.
     pub failures: Vec<(PathBuf, AppError)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conflict {
+    pub path: PathBuf,
+    pub reason: ConflictReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictReason {
+    /// Synced before, then changed on this computer.
+    ChangedLocally,
+    /// Something not created by Next GDrive is already at that path.
+    AlreadyExists,
+}
+
+impl SyncReport {
+    fn conflict(&mut self, path: PathBuf, reason: ConflictReason) {
+        self.conflicts.push(Conflict { path, reason });
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,7 +300,7 @@ where
             let path = dir.join(&synced.path);
             match remove_local_copy(self.fs, &path, &synced) {
                 Ok(Removal::Removed) => report.removed += 1,
-                Ok(Removal::KeptChanged) => report.conflicts.push(path),
+                Ok(Removal::KeptChanged) => report.conflict(path, ConflictReason::ChangedLocally),
                 Ok(Removal::KeptNotEmpty | Removal::Absent) => {}
                 Err(e) => report.failures.push((path, AppError::Storage(e))),
             }
@@ -420,7 +439,7 @@ where
                             }
                         }
                     }
-                    Some(_) => report.conflicts.push(old_path),
+                    Some(_) => report.conflict(old_path, ConflictReason::ChangedLocally),
                     None => {}
                 }
             }
@@ -428,7 +447,7 @@ where
             let action = match (local, synced) {
                 (None, _) => FileAction::Download,
                 (Some(meta), _) if meta.is_dir => {
-                    report.conflicts.push(path);
+                    report.conflict(path, ConflictReason::AlreadyExists);
                     continue;
                 }
                 (Some(meta), Some(prev)) if unchanged(prev, &meta) => {
@@ -441,17 +460,32 @@ where
                     }
                 }
                 // Not created by us, or changed locally: only take it over if identical.
-                (Some(meta), _) => match &want.item.kind {
-                    ItemKind::File { md5: Some(md5), .. }
-                        if self.fs.md5_hex(&path).await.map_err(AppError::Storage)? == *md5 =>
-                    {
+                (Some(meta), synced) => {
+                    let identical = match &want.item.kind {
+                        ItemKind::File { md5: Some(md5), .. } => {
+                            self.fs.md5_hex(&path).await.map_err(AppError::Storage)? == *md5
+                        }
+                        // Shortcuts are generated, so the expected content is known exactly.
+                        ItemKind::GoogleDoc { url } => {
+                            let shortcut = google_doc_shortcut(&want.item.name, url);
+                            self.fs
+                                .has_content(&path, shortcut.as_bytes())
+                                .await
+                                .map_err(AppError::Storage)?
+                        }
+                        _ => false,
+                    };
+                    if identical {
                         FileAction::Adopt(meta)
-                    }
-                    _ => {
-                        report.conflicts.push(path);
+                    } else {
+                        let reason = match synced {
+                            Some(_) => ConflictReason::ChangedLocally,
+                            None => ConflictReason::AlreadyExists,
+                        };
+                        report.conflict(path, reason);
                         continue;
                     }
-                },
+                }
             };
             plan.push((want, action));
         }
@@ -671,6 +705,13 @@ mod tests {
         }
     }
 
+    fn conflict(path: &str, reason: ConflictReason) -> Conflict {
+        Conflict {
+            path: PathBuf::from(format!("{DIR}/{path}")),
+            reason,
+        }
+    }
+
     impl World {
         async fn sync(&self) -> SyncReport {
             SyncAccount::new(
@@ -764,7 +805,7 @@ mod tests {
         assert_eq!(w.file("Docs/a.txt").as_deref(), Some("my edit"));
         assert_eq!(
             report.conflicts,
-            [PathBuf::from(format!("{DIR}/Docs/a.txt"))]
+            [conflict("Docs/a.txt", ConflictReason::ChangedLocally)]
         );
         assert_eq!(report.downloaded, 0);
     }
@@ -784,7 +825,7 @@ mod tests {
         assert_eq!(w.file("Docs/Sub/b.txt").as_deref(), Some("my edit"));
         assert_eq!(
             report.conflicts,
-            [PathBuf::from(format!("{DIR}/Docs/Sub/b.txt"))]
+            [conflict("Docs/Sub/b.txt", ConflictReason::ChangedLocally)]
         );
         // "Sub" still holds the edited file, so it stays.
         assert!(w.fs.is_dir(&format!("{DIR}/Docs/Sub")));
@@ -856,11 +897,32 @@ mod tests {
         assert_eq!(w.file("Docs/Sub/b.txt").as_deref(), Some("not beta"));
         assert_eq!(
             report.conflicts,
-            [PathBuf::from(format!("{DIR}/Docs/Sub/b.txt"))]
+            [conflict("Docs/Sub/b.txt", ConflictReason::AlreadyExists)]
         );
         // a.txt was adopted (no download), the shortcut downloaded.
         assert_eq!(report.downloaded, 1);
         assert_eq!(w.sync().await.conflicts.len(), 1);
+    }
+
+    /// Copies kept after deselecting a folder are taken over again, shortcuts
+    /// included, when an ancestor is selected later.
+    #[tokio::test]
+    async fn reselecting_adopts_kept_copies_including_shortcuts() {
+        let w = world();
+        w.sync().await;
+        w.settings
+            .update(|s| s.deselect(&w.account.id, &DriveItemId::new("docs")));
+        w.sync().await; // Forgets Docs; the files stay.
+        w.settings
+            .update(|s| s.select(&w.account.id, DriveItemId::new("root")));
+
+        let report = w.sync().await;
+
+        assert!(report.conflicts.is_empty(), "{:?}", report.conflicts);
+        // Only Other/c.txt is new.
+        assert_eq!(report.downloaded, 1);
+        let tracked = w.state.items(&w.account.id).unwrap();
+        assert!(tracked.iter().any(|i| i.path.ends_with("Docs/Budget.html")));
     }
 
     #[tokio::test]

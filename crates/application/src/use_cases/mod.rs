@@ -15,7 +15,9 @@ pub use get_account_status::GetAccountStatus;
 pub use list_accounts::ListAccounts;
 pub use remove_account::RemoveAccount;
 pub use settings::{GetSettings, SetSyncRoot};
-pub use sync_account::{SkipReason, SyncAccount, SyncProgress, SyncReport};
+pub use sync_account::{
+    Conflict, ConflictReason, SkipReason, SyncAccount, SyncProgress, SyncReport,
+};
 
 #[cfg(test)]
 pub(crate) mod fakes;

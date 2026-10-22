@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use nextgdrive_application::use_cases::{SkipReason, SyncProgress, SyncReport};
+use nextgdrive_application::use_cases::{ConflictReason, SkipReason, SyncProgress, SyncReport};
 use nextgdrive_domain::Account;
 use nextgdrive_i18n::FluentValue;
 
@@ -305,7 +305,13 @@ impl AccountPage {
             let rows = report
                 .conflicts
                 .iter()
-                .map(|p| (relative(p), None))
+                .map(|c| {
+                    let why = match c.reason {
+                        ConflictReason::ChangedLocally => i18n.tr("gui-conflict-changed"),
+                        ConflictReason::AlreadyExists => i18n.tr("gui-conflict-exists"),
+                    };
+                    (relative(&c.path), Some(why))
+                })
                 .collect();
             group.add(&list(
                 "gui-report-conflicts",

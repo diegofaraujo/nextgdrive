@@ -8,7 +8,9 @@ use std::process::{ExitCode, Stdio};
 
 use nextgdrive_application::AppError;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
-use nextgdrive_application::use_cases::{LocalCopies, SkipReason, SyncProgress, SyncReport};
+use nextgdrive_application::use_cases::{
+    ConflictReason, LocalCopies, SkipReason, SyncProgress, SyncReport,
+};
 use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
@@ -320,10 +322,11 @@ fn progress_line(i18n: &Localizer, p: &SyncProgress) -> String {
 fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> bool {
     let path = |p: &std::path::Path| FluentValue::from(p.display().to_string());
     for conflict in &report.conflicts {
-        eprintln!(
-            "{}",
-            i18n.tr_args("sync-conflict", [("path", path(conflict))])
-        );
+        let id = match conflict.reason {
+            ConflictReason::ChangedLocally => "sync-conflict",
+            ConflictReason::AlreadyExists => "sync-conflict-exists",
+        };
+        eprintln!("{}", i18n.tr_args(id, [("path", path(&conflict.path))]));
     }
     for (skipped, reason) in &report.skipped {
         let id = match reason {
