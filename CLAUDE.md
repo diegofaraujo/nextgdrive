@@ -48,7 +48,8 @@ Patterns to follow:
 - Adapters wrap their failures in the opaque `PortError`. Use cases map each port's errors to a distinct `AppError` variant (`Storage`, `Auth`, `Credentials`, `Drive`), which front-ends localize.
 - Tokens (`AccessToken`, `RefreshToken`) redact themselves in `Debug`; read them only through `.secret()` at the point of use.
 - Sign-in is two-step (`AddAccount::start` → `pending.url()` → `AddAccount::finish`) so each front-end opens the URL its own way (CLI: print + `xdg-open`; GUI: `gtk::UriLauncher`).
-- GUI threading: GTK stays on the main thread; use cases run on the Tokio runtime from `gui::runtime()`, and results come back through `glib::spawn_future_local` (see the `spawn` helper in `accounts_page.rs`). Never block the main thread on network or keyring calls.
+- GUI threading: GTK stays on the main thread; use cases run on the Tokio runtime from `ctx::runtime()`, and results come back through `ctx::spawn`. Sync progress crosses threads over a `tokio::sync::mpsc` channel. Never block the main thread on network or keyring calls.
+- GUI ownership (see `gui/src/ctx.rs`): each page's state is an `Rc` kept alive by its root `NavigationPage` via `keep_alive`; the state may hold the root's children but never the root, and closures stored in widgets the state owns hold only `Weak`. Breaking this either frees the page while visible (dead buttons) or leaks it.
 - GUI and CLI contain no business logic; they call use cases and render results.
 
 ### Sync engine (`application/src/use_cases/sync_account.rs`)

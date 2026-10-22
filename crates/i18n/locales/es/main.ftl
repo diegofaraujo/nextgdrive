@@ -14,6 +14,7 @@ auth-callback-failure = No se completó el inicio de sesión. Vuelve a Next GDri
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = Mi unidad
 folder-shared-drives = Unidades compartidas
+sync-progress = { $done } de { $total } archivos, { $bytes_done } de { $bytes_total }
 sync-summary = { $email }: { $downloaded } descargados ({ $bytes }), { $moved } movidos, { $removed } eliminados
 sync-conflict = Se conservó la versión local, que cambió en este equipo: { $path }
 sync-skipped-shortcut = Acceso directo de Drive omitido: { $path }
@@ -62,7 +63,6 @@ cli-folder-deselected = Carpeta deseleccionada. Se conservaron las copias locale
 cli-no-folders = No hay subcarpetas.
 cli-sync-run-about = Descargar las carpetas seleccionadas de una o de todas las cuentas
 cli-sync-run-email = Solo esta cuenta (predeterminado: todas)
-cli-sync-progress = { $done } de { $total } archivos, { $bytes_done } de { $bytes_total }
 cli-sync-nothing-selected = { $email }: nada seleccionado. Elige carpetas con "nextgdrive sync select".
 
 ## GUI
@@ -82,6 +82,42 @@ gui-add-waiting-body = Continúa en tu navegador. Si no se abrió, usa el enlace
 gui-open-browser = Abrir página de inicio de sesión
 gui-quota-loading = Comprobando almacenamiento…
 gui-quota-error = No se pudo comprobar el almacenamiento
+gui-main-menu = Menú principal
+gui-preferences = Preferencias
+gui-storage = Almacenamiento
+gui-sync-group = Sincronización
+gui-folders = Carpetas para sincronizar
+gui-folders-count = { $count ->
+    [0] Nada seleccionado
+    [one] 1 carpeta seleccionada
+   *[other] { $count } carpetas seleccionadas
+}
+gui-folders-description = Todo lo que esté dentro de una carpeta seleccionada se descarga en este equipo.
+gui-folders-inherited = Sincronizada porque una carpeta superior está seleccionada.
+gui-no-subfolders = No hay subcarpetas
+gui-sync-title = Descarga
+gui-sync-now = Sincronizar ahora
+gui-sync-never = Aún no sincronizado en esta sesión
+gui-syncing = Sincronizando…
+gui-sync-result = { $downloaded } descargados ({ $bytes }), { $moved } movidos, { $removed } eliminados
+gui-report-conflicts = { $count ->
+    [one] 1 archivo conservado con cambios hechos en este equipo
+   *[other] { $count } archivos conservados con cambios hechos en este equipo
+}
+gui-report-failures = { $count ->
+    [one] 1 elemento falló
+   *[other] { $count } elementos fallaron
+}
+gui-report-skipped = { $count ->
+    [one] 1 elemento omitido
+   *[other] { $count } elementos omitidos
+}
+gui-skipped-shortcut = Acceso directo de Drive
+gui-skipped-locked = El propietario no permite descargarlo
+gui-open-folder = Abrir carpeta
+gui-sync-root = Carpeta de sincronización
+gui-sync-root-change = Cambiar…
+gui-sync-root-note = Cada cuenta tiene su propia carpeta dentro de ella. Los archivos ya sincronizados se quedan donde están; la próxima sincronización descarga en la nueva carpeta.
 
 ## Errors
 

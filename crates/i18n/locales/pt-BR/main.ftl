@@ -14,6 +14,7 @@ auth-callback-failure = O login não foi concluído. Volte ao Next GDrive e tent
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = Meu Drive
 folder-shared-drives = Drives compartilhados
+sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
 sync-summary = { $email }: { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
 sync-conflict = Mantida a versão local, que foi alterada neste computador: { $path }
 sync-skipped-shortcut = Atalho do Drive ignorado: { $path }
@@ -62,7 +63,6 @@ cli-folder-deselected = Pasta desmarcada. As cópias locais foram mantidas e nã
 cli-no-folders = Nenhuma subpasta.
 cli-sync-run-about = Baixar as pastas selecionadas de uma ou de todas as contas
 cli-sync-run-email = Apenas esta conta (padrão: todas)
-cli-sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
 cli-sync-nothing-selected = { $email }: nada selecionado. Escolha pastas com "nextgdrive sync select".
 
 ## GUI
@@ -82,6 +82,42 @@ gui-add-waiting-body = Continue no navegador. Se ele não abriu, use o link abai
 gui-open-browser = Abrir página de login
 gui-quota-loading = Verificando armazenamento…
 gui-quota-error = Não foi possível verificar o armazenamento
+gui-main-menu = Menu principal
+gui-preferences = Preferências
+gui-storage = Armazenamento
+gui-sync-group = Sincronização
+gui-folders = Pastas para sincronizar
+gui-folders-count = { $count ->
+    [0] Nada selecionado
+    [one] 1 pasta selecionada
+   *[other] { $count } pastas selecionadas
+}
+gui-folders-description = Tudo o que estiver dentro de uma pasta selecionada é baixado para este computador.
+gui-folders-inherited = Sincronizada porque uma pasta acima dela está selecionada.
+gui-no-subfolders = Nenhuma subpasta
+gui-sync-title = Download
+gui-sync-now = Sincronizar agora
+gui-sync-never = Ainda não sincronizado nesta sessão
+gui-syncing = Sincronizando…
+gui-sync-result = { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
+gui-report-conflicts = { $count ->
+    [one] 1 arquivo mantido com alterações feitas neste computador
+   *[other] { $count } arquivos mantidos com alterações feitas neste computador
+}
+gui-report-failures = { $count ->
+    [one] 1 item falhou
+   *[other] { $count } itens falharam
+}
+gui-report-skipped = { $count ->
+    [one] 1 item ignorado
+   *[other] { $count } itens ignorados
+}
+gui-skipped-shortcut = Atalho do Drive
+gui-skipped-locked = O proprietário não permite download
+gui-open-folder = Abrir pasta
+gui-sync-root = Pasta de sincronização
+gui-sync-root-change = Alterar…
+gui-sync-root-note = Cada conta ganha a sua própria pasta dentro dela. Os arquivos já sincronizados ficam onde estão; a próxima sincronização baixa para a nova pasta.
 
 ## Errors
 

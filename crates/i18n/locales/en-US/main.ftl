@@ -14,6 +14,7 @@ auth-callback-failure = Sign-in was not completed. Return to Next GDrive and try
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = My Drive
 folder-shared-drives = Shared drives
+sync-progress = { $done } of { $total } files, { $bytes_done } of { $bytes_total }
 sync-summary = { $email }: { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
 sync-conflict = Kept the local version, which changed on this computer: { $path }
 sync-skipped-shortcut = Skipped Drive shortcut: { $path }
@@ -62,7 +63,6 @@ cli-folder-deselected = Folder deselected. Local copies were kept and will no lo
 cli-no-folders = No subfolders.
 cli-sync-run-about = Download the selected folders of one or all accounts
 cli-sync-run-email = Only this account (default: all)
-cli-sync-progress = { $done } of { $total } files, { $bytes_done } of { $bytes_total }
 cli-sync-nothing-selected = { $email }: nothing selected. Choose folders with "nextgdrive sync select".
 
 ## GUI
@@ -82,6 +82,42 @@ gui-add-waiting-body = Continue in your browser. If it did not open, use the lin
 gui-open-browser = Open sign-in page
 gui-quota-loading = Checking storage…
 gui-quota-error = Could not check storage
+gui-main-menu = Main Menu
+gui-preferences = Preferences
+gui-storage = Storage
+gui-sync-group = Sync
+gui-folders = Folders to Sync
+gui-folders-count = { $count ->
+    [0] Nothing selected
+    [one] 1 folder selected
+   *[other] { $count } folders selected
+}
+gui-folders-description = Everything inside a selected folder is downloaded to this computer.
+gui-folders-inherited = Synced because a folder above it is selected.
+gui-no-subfolders = No Subfolders
+gui-sync-title = Download
+gui-sync-now = Sync Now
+gui-sync-never = Not synced yet in this session
+gui-syncing = Syncing…
+gui-sync-result = { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
+gui-report-conflicts = { $count ->
+    [one] 1 file kept with changes made on this computer
+   *[other] { $count } files kept with changes made on this computer
+}
+gui-report-failures = { $count ->
+    [one] 1 item failed
+   *[other] { $count } items failed
+}
+gui-report-skipped = { $count ->
+    [one] 1 item skipped
+   *[other] { $count } items skipped
+}
+gui-skipped-shortcut = Drive shortcut
+gui-skipped-locked = The owner does not allow downloading
+gui-open-folder = Open Folder
+gui-sync-root = Sync Folder
+gui-sync-root-change = Change…
+gui-sync-root-note = Each account gets its own folder inside it. Files already synced stay where they are; the next sync downloads into the new folder.
 
 ## Errors
 
