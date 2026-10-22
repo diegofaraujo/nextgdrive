@@ -32,6 +32,18 @@ pub struct SyncedItem {
 
 /// Remembers the state of synced items, per account.
 pub trait SyncStateStore: Sync {
+    /// Held while an account is being synced; released on drop.
+    type Lock: Send;
+
+    /// Exclusive right to change an account's synced files and state, across
+    /// processes. `None` if someone else holds it.
+    fn try_lock(&self, account: &AccountId) -> Result<Option<Self::Lock>, PortError>;
+
+    /// Position in Drive's change feed up to which the account is synced.
+    fn cursor(&self, account: &AccountId) -> Result<Option<String>, PortError>;
+
+    fn set_cursor(&self, account: &AccountId, cursor: &str) -> Result<(), PortError>;
+
     fn items(&self, account: &AccountId) -> Result<Vec<SyncedItem>, PortError>;
 
     fn upsert(&self, account: &AccountId, item: &SyncedItem) -> Result<(), PortError>;

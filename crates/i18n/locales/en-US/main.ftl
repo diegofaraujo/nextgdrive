@@ -15,6 +15,7 @@ auth-callback-failure = Sign-in was not completed. Return to Next GDrive and try
 folder-my-drive = My Drive
 folder-shared-drives = Shared drives
 sync-progress = { $done } of { $total } files, { $bytes_done } of { $bytes_total }
+sync-started = { $email }: syncing…
 sync-summary = { $email }: { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
 sync-conflict = Kept the local version, which changed on this computer: { $path }
 sync-conflict-exists = Kept the existing local file, which is different from Drive and was not created by Next GDrive: { $path }
@@ -71,6 +72,9 @@ cli-folder-deselected-removed = Folder deselected. { $removed ->
     [one] 1 item removed from this computer.
    *[other] { $removed } items removed from this computer.
 }
+cli-daemon-about = Keep accounts in sync in the foreground, without a graphical interface
+cli-daemon-started = Next GDrive is running and checks Google Drive every { $secs } seconds. Press Ctrl+C to stop.
+cli-daemon-stopped = Next GDrive stopped.
 
 ## GUI
 
@@ -155,3 +159,4 @@ error-oauth-client-missing = The Google OAuth client is not configured. Save the
 error-oauth-client-unreadable = Could not read the OAuth client file { $path }: { $details }
 error-invalid-sync-root = The sync folder must be an absolute path: { $path }
 error-not-a-folder = Not a folder: { $id }
+error-sync-in-progress = This account is already being synced, by this or another Next GDrive process.

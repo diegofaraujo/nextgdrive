@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use md5::{Digest, Md5};
@@ -12,8 +12,8 @@ use nextgdrive_domain::{
 };
 
 use crate::ports::{
-    AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, CredentialStore,
-    DriveAccountInfo, DriveService, FileWriter, LocalFileSystem, LocalMetadata,
+    AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, Changes,
+    CredentialStore, DriveAccountInfo, DriveService, FileWriter, LocalFileSystem, LocalMetadata,
     PendingAuthorization, PortError, RefreshToken, SettingsRepository, SyncStateStore, SyncedItem,
 };
 
@@ -64,6 +64,7 @@ impl Default for InMemorySettings {
             sync_root: "/home/ana/GoogleDrive".into(),
             my_drive_folder: "My Drive".into(),
             shared_drives_folder: "Shared drives".into(),
+            poll_interval_secs: Settings::DEFAULT_POLL_INTERVAL_SECS,
             selections: BTreeMap::new(),
         }))
     }
@@ -187,6 +188,9 @@ pub struct FakeDrive {
     /// File whose download returns content that does not match its MD5.
     corrupt: Option<DriveItemId>,
     clock: u64,
+    /// Bumped by every change, like Drive's change feed position.
+    version: u64,
+    pub changes_calls: AtomicUsize,
 }
 
 pub fn md5_hex(content: &[u8]) -> String {
@@ -217,11 +221,14 @@ impl FakeDrive {
             failing: None,
             corrupt: None,
             clock: 0,
+            version: 0,
+            changes_calls: AtomicUsize::new(0),
         }
     }
 
     fn tick(&mut self) -> SystemTime {
         self.clock += 1;
+        self.version += 1;
         SystemTime::UNIX_EPOCH + Duration::from_secs(self.clock)
     }
 
@@ -270,14 +277,17 @@ impl FakeDrive {
     }
 
     pub fn rename(&mut self, id: &str, name: &str) {
+        self.version += 1;
         self.items.get_mut(&DriveItemId::new(id)).unwrap().name = name.into();
     }
 
     pub fn move_to(&mut self, id: &str, parent: &str) {
+        self.version += 1;
         self.items.get_mut(&DriveItemId::new(id)).unwrap().parents = vec![DriveItemId::new(parent)];
     }
 
     pub fn remove(&mut self, id: &str) {
+        self.version += 1;
         self.items.remove(&DriveItemId::new(id));
     }
 
@@ -338,6 +348,20 @@ impl DriveService for FakeDrive {
             .get(id)
             .cloned()
             .ok_or_else(|| PortError::new(format!("no item {id}")))
+    }
+
+    async fn changes_since(
+        &self,
+        token: &AccessToken,
+        cursor: Option<&str>,
+    ) -> Result<Changes, PortError> {
+        Self::check(token)?;
+        self.changes_calls.fetch_add(1, Ordering::Relaxed);
+        let current = self.version.to_string();
+        Ok(Changes {
+            any: cursor != Some(current.as_str()),
+            cursor: current,
+        })
     }
 
     async fn download<W: FileWriter>(
@@ -547,12 +571,43 @@ impl LocalFileSystem for FakeFileSystem {
 }
 
 #[derive(Default)]
-pub struct InMemorySyncState(Mutex<HashMap<(AccountId, DriveItemId), SyncedItem>>);
+pub struct InMemorySyncState {
+    items: Mutex<HashMap<(AccountId, DriveItemId), SyncedItem>>,
+    cursors: Mutex<HashMap<AccountId, String>>,
+    locked: Arc<Mutex<HashSet<AccountId>>>,
+}
+
+pub struct FakeLock(Arc<Mutex<HashSet<AccountId>>>, AccountId);
+
+impl Drop for FakeLock {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().remove(&self.1);
+    }
+}
 
 impl SyncStateStore for InMemorySyncState {
+    type Lock = FakeLock;
+
+    fn try_lock(&self, account: &AccountId) -> Result<Option<FakeLock>, PortError> {
+        let inserted = self.locked.lock().unwrap().insert(account.clone());
+        Ok(inserted.then(|| FakeLock(self.locked.clone(), account.clone())))
+    }
+
+    fn cursor(&self, account: &AccountId) -> Result<Option<String>, PortError> {
+        Ok(self.cursors.lock().unwrap().get(account).cloned())
+    }
+
+    fn set_cursor(&self, account: &AccountId, cursor: &str) -> Result<(), PortError> {
+        self.cursors
+            .lock()
+            .unwrap()
+            .insert(account.clone(), cursor.to_owned());
+        Ok(())
+    }
+
     fn items(&self, account: &AccountId) -> Result<Vec<SyncedItem>, PortError> {
         Ok(self
-            .0
+            .items
             .lock()
             .unwrap()
             .iter()
@@ -562,7 +617,7 @@ impl SyncStateStore for InMemorySyncState {
     }
 
     fn upsert(&self, account: &AccountId, item: &SyncedItem) -> Result<(), PortError> {
-        self.0
+        self.items
             .lock()
             .unwrap()
             .insert((account.clone(), item.id.clone()), item.clone());
@@ -570,7 +625,7 @@ impl SyncStateStore for InMemorySyncState {
     }
 
     fn remove(&self, account: &AccountId, item: &DriveItemId) -> Result<(), PortError> {
-        self.0
+        self.items
             .lock()
             .unwrap()
             .remove(&(account.clone(), item.clone()));

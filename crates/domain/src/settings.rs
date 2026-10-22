@@ -13,12 +13,16 @@ pub struct Settings {
     /// does not move the user's files.
     pub my_drive_folder: String,
     pub shared_drives_folder: String,
+    /// How often background sync checks Drive for changes, in seconds.
+    pub poll_interval_secs: u64,
     /// Folders (or drive roots) chosen for download, per account. Everything
     /// inside a selected folder is synced. Accounts start with nothing selected.
     pub selections: BTreeMap<AccountId, BTreeSet<DriveItemId>>,
 }
 
 impl Settings {
+    pub const DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
+
     pub fn selection(&self, account: &AccountId) -> impl Iterator<Item = &DriveItemId> {
         self.selections.get(account).into_iter().flatten()
     }

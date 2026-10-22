@@ -12,6 +12,8 @@ pub enum AppError {
     AccountNotFound(Email),
     #[error("no stored credentials for {0}; add the account again")]
     MissingCredentials(Email),
+    #[error("{0} is already being synced")]
+    SyncInProgress(Email),
     #[error("sync folder must be an absolute path: {0}")]
     InvalidSyncRoot(PathBuf),
     #[error("not a folder: {0}")]

@@ -84,6 +84,12 @@ where
         folder: &DriveItemId,
         copies: LocalCopies,
     ) -> Result<DeselectReport, AppError> {
+        // Removing files while a sync writes them would race.
+        let _lock = self
+            .state
+            .try_lock(&account.id)
+            .map_err(AppError::Storage)?
+            .ok_or_else(|| AppError::SyncInProgress(account.email.clone()))?;
         let mut settings = self.settings.load().map_err(AppError::Storage)?;
         settings.deselect(&account.id, folder);
         self.settings.save(&settings).map_err(AppError::Storage)?;

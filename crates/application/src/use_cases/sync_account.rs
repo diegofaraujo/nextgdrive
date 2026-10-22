@@ -126,6 +126,11 @@ where
         account: &Account,
         on_progress: &(dyn Fn(&SyncProgress) + Sync),
     ) -> Result<SyncReport, AppError> {
+        let _lock = self
+            .state
+            .try_lock(&account.id)
+            .map_err(AppError::Storage)?
+            .ok_or_else(|| AppError::SyncInProgress(account.email.clone()))?;
         let settings = self.settings.load().map_err(AppError::Storage)?;
         let dir = settings.account_dir(account);
         let mut report = SyncReport::default();

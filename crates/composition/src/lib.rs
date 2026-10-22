@@ -13,6 +13,7 @@ use nextgdrive_adapter_keyring::KeyringCredentialStore;
 use nextgdrive_adapter_localfs::Filesystem;
 use nextgdrive_adapter_sqlite::SqliteSyncState;
 use nextgdrive_application::TokenProvider;
+use nextgdrive_application::background::BackgroundSync;
 use nextgdrive_application::use_cases::{
     AddAccount, BrowseDrive, ChangeSelection, GetAccountStatus, GetSettings, ListAccounts,
     RemoveAccount, SetSyncRoot, SyncAccount,
@@ -193,6 +194,31 @@ impl Services {
     }
 }
 
+impl Services {
+    #[allow(clippy::type_complexity)]
+    pub fn background_sync(
+        &self,
+    ) -> BackgroundSync<
+        '_,
+        GoogleAuthenticator,
+        KeyringCredentialStore,
+        GoogleDrive,
+        Filesystem,
+        TomlSettingsRepository,
+        SqliteSyncState,
+        TomlAccountRepository,
+    > {
+        BackgroundSync::new(
+            &self.tokens,
+            &self.drive,
+            &self.fs,
+            &self.local.settings,
+            &self.state,
+            &self.local.accounts,
+        )
+    }
+}
+
 /// `~/GoogleDrive`, with folder names in the current language.
 fn default_settings(i18n: &Localizer) -> Result<Settings, String> {
     let home = std::env::home_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
@@ -200,6 +226,7 @@ fn default_settings(i18n: &Localizer) -> Result<Settings, String> {
         sync_root: home.join(DEFAULT_SYNC_DIR),
         my_drive_folder: i18n.tr("folder-my-drive"),
         shared_drives_folder: i18n.tr("folder-shared-drives"),
+        poll_interval_secs: Settings::DEFAULT_POLL_INTERVAL_SECS,
         selections: BTreeMap::new(),
     })
 }

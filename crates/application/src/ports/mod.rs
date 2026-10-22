@@ -12,7 +12,7 @@ pub use auth::{
     AccessGrant, AccessToken, Authenticator, AuthorizedTokens, PendingAuthorization, RefreshToken,
 };
 pub use credentials::CredentialStore;
-pub use drive::{DriveAccountInfo, DriveService};
+pub use drive::{Changes, DriveAccountInfo, DriveService};
 pub use error::PortError;
 pub use local_fs::{FileWriter, LocalFileSystem, LocalMetadata};
 pub use settings::SettingsRepository;
