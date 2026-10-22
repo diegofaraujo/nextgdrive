@@ -8,7 +8,7 @@ use std::process::{ExitCode, Stdio};
 
 use nextgdrive_application::AppError;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
-use nextgdrive_application::use_cases::{SkipReason, SyncProgress, SyncReport};
+use nextgdrive_application::use_cases::{LocalCopies, SkipReason, SyncProgress, SyncReport};
 use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
@@ -254,14 +254,51 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
                 .map_err(app_error)?;
             println!("{}", i18n.tr("cli-folder-selected"));
         }
-        Command::Sync(SyncCommand::Deselect { email, folder }) => {
+        Command::Sync(SyncCommand::Deselect {
+            email,
+            folder,
+            remove_local,
+        }) => {
             let services = Services::new(i18n).await?;
             let account = find_account(&services.local, &email, i18n)?;
-            services
+            let copies = if remove_local {
+                LocalCopies::Remove
+            } else {
+                LocalCopies::Keep
+            };
+            let report = services
                 .change_selection()
-                .deselect(&account, &DriveItemId::new(folder))
+                .deselect(&account, &DriveItemId::new(folder), copies)
                 .map_err(app_error)?;
-            println!("{}", i18n.tr("cli-folder-deselected"));
+            let path = |p: &std::path::Path| FluentValue::from(p.display().to_string());
+            for kept in &report.kept {
+                eprintln!("{}", i18n.tr_args("sync-conflict", [("path", path(kept))]));
+            }
+            for (failed, error) in &report.failures {
+                eprintln!(
+                    "{}",
+                    i18n.tr_args(
+                        "sync-failed",
+                        [
+                            ("path", path(failed)),
+                            ("error", i18n.app_error(error).into())
+                        ]
+                    )
+                );
+            }
+            match copies {
+                LocalCopies::Keep => println!("{}", i18n.tr("cli-folder-deselected")),
+                LocalCopies::Remove => println!(
+                    "{}",
+                    i18n.tr_args(
+                        "cli-folder-deselected-removed",
+                        [("removed", FluentValue::from(report.removed))]
+                    )
+                ),
+            }
+            if !report.failures.is_empty() {
+                return Err(String::new());
+            }
         }
     }
     Ok(())

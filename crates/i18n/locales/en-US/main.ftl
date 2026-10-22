@@ -64,6 +64,12 @@ cli-no-folders = No subfolders.
 cli-sync-run-about = Download the selected folders of one or all accounts
 cli-sync-run-email = Only this account (default: all)
 cli-sync-nothing-selected = { $email }: nothing selected. Choose folders with "nextgdrive sync select".
+cli-sync-keep-local = Keep downloaded files as regular files, no longer updated
+cli-sync-remove-local = Remove downloaded files from this computer (they stay in Google Drive)
+cli-folder-deselected-removed = Folder deselected. { $removed ->
+    [one] 1 item removed from this computer.
+   *[other] { $removed } items removed from this computer.
+}
 
 ## GUI
 
@@ -118,6 +124,19 @@ gui-open-folder = Open Folder
 gui-sync-root = Sync Folder
 gui-sync-root-change = Change…
 gui-sync-root-note = Each account gets its own folder inside it. Files already synced stay where they are; the next sync downloads into the new folder.
+gui-deselect-title = Stop Syncing “{ $name }”?
+gui-deselect-body = Downloaded files can be removed from this computer, where they stay available in Google Drive, or kept as regular files that are no longer updated. Files you changed on this computer are always kept.
+gui-deselect-keep = Keep Files
+gui-deselect-remove = Remove Files
+gui-deselect-removed = { $removed ->
+    [one] 1 item removed from this computer
+   *[other] { $removed } items removed from this computer
+}
+gui-deselect-kept = { $count ->
+    [one] 1 file kept because it changed on this computer
+   *[other] { $count } files kept because they changed on this computer
+}
+gui-deselect-kept-files = Folder deselected. Its files were kept and will no longer be updated.
 
 ## Errors
 

@@ -148,6 +148,7 @@ impl Services {
         BrowseDrive::new(&self.tokens, &self.drive, &self.local.settings)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn change_selection(
         &self,
     ) -> ChangeSelection<
@@ -156,8 +157,16 @@ impl Services {
         KeyringCredentialStore,
         GoogleDrive,
         TomlSettingsRepository,
+        Filesystem,
+        SqliteSyncState,
     > {
-        ChangeSelection::new(&self.tokens, &self.drive, &self.local.settings)
+        ChangeSelection::new(
+            &self.tokens,
+            &self.drive,
+            &self.local.settings,
+            &self.fs,
+            &self.state,
+        )
     }
 }
 

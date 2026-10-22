@@ -64,6 +64,12 @@ cli-no-folders = Nenhuma subpasta.
 cli-sync-run-about = Baixar as pastas selecionadas de uma ou de todas as contas
 cli-sync-run-email = Apenas esta conta (padrão: todas)
 cli-sync-nothing-selected = { $email }: nada selecionado. Escolha pastas com "nextgdrive sync select".
+cli-sync-keep-local = Manter os arquivos baixados como arquivos comuns, sem atualizações
+cli-sync-remove-local = Remover os arquivos baixados deste computador (eles continuam no Google Drive)
+cli-folder-deselected-removed = Pasta desmarcada. { $removed ->
+    [one] 1 item removido deste computador.
+   *[other] { $removed } itens removidos deste computador.
+}
 
 ## GUI
 
@@ -118,6 +124,19 @@ gui-open-folder = Abrir pasta
 gui-sync-root = Pasta de sincronização
 gui-sync-root-change = Alterar…
 gui-sync-root-note = Cada conta ganha a sua própria pasta dentro dela. Os arquivos já sincronizados ficam onde estão; a próxima sincronização baixa para a nova pasta.
+gui-deselect-title = Parar de sincronizar “{ $name }”?
+gui-deselect-body = Os arquivos baixados podem ser removidos deste computador, continuando disponíveis no Google Drive, ou mantidos como arquivos comuns que não serão mais atualizados. Arquivos que você alterou neste computador são sempre mantidos.
+gui-deselect-keep = Manter arquivos
+gui-deselect-remove = Remover arquivos
+gui-deselect-removed = { $removed ->
+    [one] 1 item removido deste computador
+   *[other] { $removed } itens removidos deste computador
+}
+gui-deselect-kept = { $count ->
+    [one] 1 arquivo mantido porque foi alterado neste computador
+   *[other] { $count } arquivos mantidos porque foram alterados neste computador
+}
+gui-deselect-kept-files = Pasta desmarcada. Os arquivos foram mantidos e não serão mais atualizados.
 
 ## Errors
 

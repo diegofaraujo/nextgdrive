@@ -64,6 +64,12 @@ cli-no-folders = No hay subcarpetas.
 cli-sync-run-about = Descargar las carpetas seleccionadas de una o de todas las cuentas
 cli-sync-run-email = Solo esta cuenta (predeterminado: todas)
 cli-sync-nothing-selected = { $email }: nada seleccionado. Elige carpetas con "nextgdrive sync select".
+cli-sync-keep-local = Conservar los archivos descargados como archivos normales, sin actualizaciones
+cli-sync-remove-local = Eliminar los archivos descargados de este equipo (siguen en Google Drive)
+cli-folder-deselected-removed = Carpeta deseleccionada. { $removed ->
+    [one] 1 elemento eliminado de este equipo.
+   *[other] { $removed } elementos eliminados de este equipo.
+}
 
 ## GUI
 
@@ -118,6 +124,19 @@ gui-open-folder = Abrir carpeta
 gui-sync-root = Carpeta de sincronización
 gui-sync-root-change = Cambiar…
 gui-sync-root-note = Cada cuenta tiene su propia carpeta dentro de ella. Los archivos ya sincronizados se quedan donde están; la próxima sincronización descarga en la nueva carpeta.
+gui-deselect-title = ¿Dejar de sincronizar «{ $name }»?
+gui-deselect-body = Los archivos descargados pueden eliminarse de este equipo, y seguirán disponibles en Google Drive, o conservarse como archivos normales que ya no se actualizarán. Los archivos que cambiaste en este equipo siempre se conservan.
+gui-deselect-keep = Conservar archivos
+gui-deselect-remove = Eliminar archivos
+gui-deselect-removed = { $removed ->
+    [one] 1 elemento eliminado de este equipo
+   *[other] { $removed } elementos eliminados de este equipo
+}
+gui-deselect-kept = { $count ->
+    [one] 1 archivo conservado porque cambió en este equipo
+   *[other] { $count } archivos conservados porque cambiaron en este equipo
+}
+gui-deselect-kept-files = Carpeta deseleccionada. Sus archivos se conservaron y ya no se actualizarán.
 
 ## Errors
 
