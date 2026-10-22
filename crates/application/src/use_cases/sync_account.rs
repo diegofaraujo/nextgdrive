@@ -405,6 +405,14 @@ where
             if let Some(prev) = synced.filter(|s| s.path != want.path) {
                 let old_path = dir.join(&prev.path);
                 match self.fs.metadata(&old_path).map_err(AppError::Storage)? {
+                    // Shortcuts embed the name and may change format (e.g. the
+                    // extension), so they are rewritten rather than moved.
+                    Some(meta) if unchanged(prev, &meta) && prev.kind == SyncedKind::GoogleDoc => {
+                        if let Err(e) = self.fs.remove_file(&old_path) {
+                            report.failures.push((old_path, AppError::Storage(e)));
+                            continue;
+                        }
+                    }
                     Some(meta) if unchanged(prev, &meta) && local.is_none() => {
                         if let Some(parent) = path.parent() {
                             self.fs.create_dir_all(parent).map_err(AppError::Storage)?;
@@ -706,13 +714,13 @@ mod tests {
 
         assert_eq!(
             w.files(),
-            ["Docs/Budget.desktop", "Docs/Sub/b.txt", "Docs/a.txt"]
+            ["Docs/Budget.html", "Docs/Sub/b.txt", "Docs/a.txt"]
         );
         assert_eq!(w.file("Docs/a.txt").as_deref(), Some("alpha"));
         assert!(
-            w.file("Docs/Budget.desktop")
+            w.file("Docs/Budget.html")
                 .unwrap()
-                .contains("URL=https://docs.google.com/spreadsheets/d/sheet")
+                .contains("url=https://docs.google.com/spreadsheets/d/sheet")
         );
         assert_eq!(report.downloaded, 3);
         assert_eq!(
@@ -808,7 +816,7 @@ mod tests {
         assert_eq!(
             w.files(),
             [
-                "Docs/Budget.desktop",
+                "Docs/Budget.html",
                 "Docs/Renamed/a.txt",
                 "Docs/Renamed/b.txt"
             ]
@@ -818,6 +826,22 @@ mod tests {
         // And the new locations are remembered.
         let again = w.sync().await;
         assert_eq!((again.downloaded, again.moved), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn renamed_google_doc_gets_a_fresh_shortcut() {
+        let mut w = world();
+        w.sync().await;
+        w.drive.rename("sheet", "Budget 2025");
+
+        w.sync().await;
+
+        assert_eq!(w.file("Docs/Budget.html"), None);
+        assert!(
+            w.file("Docs/Budget 2025.html")
+                .unwrap()
+                .contains("<title>Budget 2025</title>")
+        );
     }
 
     #[tokio::test]

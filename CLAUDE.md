@@ -60,7 +60,7 @@ Download-only for now (upload is the next phase). Invariants that tests in that 
 - Each `SyncedItem` remembers the selected folder it was synced under: an item that disappears because its folder was deselected is forgotten (local copy kept); one that disappears while its folder is still selected was removed on Drive and its unchanged local copy is deleted.
 - Downloads are verified against Drive's MD5 before replacing anything. Local mtimes are set to Drive's `modifiedTime`.
 - Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`. The two folder names are translated once and pinned in `settings.toml`.
-- Google Docs/Sheets/etc. become freedesktop `.desktop` links (`Type=Link`); Drive shortcuts and non-downloadable files are skipped and reported.
+- Google Docs/Sheets/etc. become small `.html` pages that redirect to the document (`.desktop` links do not open from COSMIC Files or recent Nautilus). Shortcuts are rewritten, never moved, when their name or format changes. Drive shortcuts and non-downloadable files are skipped and reported.
 
 To exercise the engine against a real account without touching the real setup, isolate everything except the keyring:
 

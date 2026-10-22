@@ -10,19 +10,34 @@ use crate::{DriveItemId, ItemKind};
 
 /// Linux limit for one path component, in bytes.
 const MAX_NAME_BYTES: usize = 255;
-/// Extension of the shortcut files that stand in for Google Docs.
-pub const GOOGLE_DOC_EXTENSION: &str = "desktop";
+/// Extension of the shortcut files that stand in for Google Docs. An HTML page
+/// opens in the browser from any file manager, unlike `.desktop` links.
+pub const GOOGLE_DOC_EXTENSION: &str = "html";
 
-/// Contents of the file that stands in for a Google Doc: a freedesktop.org
-/// link that opens the document in the browser.
+/// Contents of the file that stands in for a Google Doc: a page that
+/// redirects to the document. Only `https` URLs are linked, so a crafted URL
+/// cannot run script in the page.
 pub fn google_doc_shortcut(name: &str, url: &str) -> String {
-    // Line breaks would end the key early and inject other keys.
-    let clean = |value: &str| value.replace(['\n', '\r'], " ");
+    let url = if url.starts_with("https://") {
+        url
+    } else {
+        "about:blank"
+    };
+    let (name, url) = (escape_html(name), escape_html(url));
     format!(
-        "[Desktop Entry]\nType=Link\nName={}\nURL={}\nIcon=text-html\n",
-        clean(name),
-        clean(url)
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\
+         <meta http-equiv=\"refresh\" content=\"0; url={url}\">\
+         <title>{name}</title></head>\n<body><a href=\"{url}\">{name}</a></body></html>\n"
     )
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// Valid local file name for an item, before resolving clashes between siblings.
@@ -123,18 +138,26 @@ mod tests {
     }
 
     #[test]
-    fn google_docs_become_desktop_files() {
+    fn google_docs_become_html_files() {
         let doc = ItemKind::GoogleDoc {
             url: "https://docs.google.com/x".into(),
         };
-        assert_eq!(local_name("Budget", &doc), "Budget.desktop");
+        assert_eq!(local_name("Budget", &doc), "Budget.html");
     }
 
     #[test]
-    fn shortcut_cannot_inject_keys() {
-        let shortcut = google_doc_shortcut("Evil\nExec=rm -rf ~", "https://docs.google.com/d/1");
-        assert!(shortcut.contains("Name=Evil Exec=rm -rf ~\n"));
-        assert!(!shortcut.lines().any(|line| line.starts_with("Exec=")));
+    fn shortcut_redirects_to_the_document() {
+        let page = google_doc_shortcut("Budget", "https://docs.google.com/d/1?a=1&b=2");
+        assert!(page.contains(r#"content="0; url=https://docs.google.com/d/1?a=1&amp;b=2""#));
+        assert!(page.contains("<title>Budget</title>"));
+    }
+
+    #[test]
+    fn shortcut_cannot_inject_markup_or_script() {
+        let page = google_doc_shortcut("<script>alert(1)</script>\"", "javascript:alert(1)");
+        assert!(!page.contains("<script>"));
+        assert!(!page.contains("javascript:"));
+        assert!(page.contains("url=about:blank"));
     }
 
     #[test]
