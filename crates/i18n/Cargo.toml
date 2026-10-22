@@ -1,0 +1,16 @@
+[package]
+name = "nextgdrive-i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+fluent-templates = "0.15.1"
+nextgdrive-application = { version = "0.1.0", path = "../application" }
+nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+sys-locale = "0.3.2"
