@@ -24,6 +24,7 @@ const FALLBACK: LanguageIdentifier = langid!("en-US");
 /// `es-MX`) is served by the entry with the same language.
 static SUPPORTED: [LanguageIdentifier; 3] = [langid!("en-US"), langid!("pt-BR"), langid!("es")];
 
+#[derive(Clone)]
 pub struct Localizer {
     lang: LanguageIdentifier,
 }

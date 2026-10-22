@@ -83,6 +83,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "ashpd"
 version = "0.13.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -387,6 +396,15 @@ name = "crossbeam-epoch"
 version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03e8bd762f7479489c70ed6c768ddca99d7296857de437a68dcb2a94365b3fae"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1402,6 +1420,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ksni"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf"
+dependencies = [
+ "arc-swap",
+ "crossbeam-queue",
+ "futures-util",
+ "pastey",
+ "serde",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "libadwaita"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1546,6 +1579,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nextgdrive-adapter-dbus"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "nextgdrive-adapter-google"
 version = "0.1.0"
 dependencies = [
@@ -1606,6 +1648,7 @@ name = "nextgdrive-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "nextgdrive-adapter-dbus",
  "nextgdrive-application",
  "nextgdrive-composition",
  "nextgdrive-domain",
@@ -1618,6 +1661,7 @@ name = "nextgdrive-composition"
 version = "0.1.0"
 dependencies = [
  "nextgdrive-adapter-config",
+ "nextgdrive-adapter-dbus",
  "nextgdrive-adapter-google",
  "nextgdrive-adapter-keyring",
  "nextgdrive-adapter-localfs",
@@ -1625,6 +1669,8 @@ dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
  "nextgdrive-i18n",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -1639,7 +1685,9 @@ name = "nextgdrive-gui"
 version = "0.1.0"
 dependencies = [
  "gtk4",
+ "ksni",
  "libadwaita",
+ "nextgdrive-adapter-dbus",
  "nextgdrive-application",
  "nextgdrive-composition",
  "nextgdrive-domain",
@@ -1847,6 +1895,12 @@ name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "pbkdf2"

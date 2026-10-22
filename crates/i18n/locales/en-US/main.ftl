@@ -23,6 +23,18 @@ sync-skipped-shortcut = Skipped Drive shortcut: { $path }
 sync-skipped-locked = Skipped, the owner does not allow downloading: { $path }
 sync-failed = Failed: { $path }: { $error }
 
+status-up-to-date = Up to date
+status-checked-ago = { $minutes ->
+    [0] checked just now
+    [one] checked 1 minute ago
+   *[other] checked { $minutes } minutes ago
+}
+status-starting = Starting…
+status-checking = Checking { $email }…
+status-syncing = Syncing { $email }: { $done } of { $total } files
+status-paused = Sync paused
+status-problem = Problem with { $email }: { $message }
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -75,6 +87,10 @@ cli-folder-deselected-removed = Folder deselected. { $removed ->
 cli-daemon-about = Keep accounts in sync in the foreground, without a graphical interface
 cli-daemon-started = Next GDrive is running and checks Google Drive every { $secs } seconds. Press Ctrl+C to stop.
 cli-daemon-stopped = Next GDrive stopped.
+cli-status-about = Show what Next GDrive is doing in the background
+cli-status-not-running = Next GDrive is not running in the background. Open the app, or run "nextgdrive daemon".
+cli-sync-requested = Asked the Next GDrive running in the background to sync now.
+cli-daemon-already-running = Next GDrive is already running in the background (the app in the system tray, or another "nextgdrive daemon").
 
 ## GUI
 
@@ -144,6 +160,15 @@ gui-deselect-kept = { $count ->
    *[other] { $count } files kept because they changed on this computer
 }
 gui-deselect-kept-files = Folder deselected. Its files were kept and will no longer be updated.
+gui-background-group = Background
+gui-autostart = Start at Login
+gui-autostart-subtitle = Keep files in sync from the system tray, without opening the window
+gui-host-elsewhere = Another Next GDrive process (such as "nextgdrive daemon") is already syncing in the background.
+tray-open = Open Next GDrive
+tray-sync-now = Sync Now
+tray-pause = Pause Syncing
+tray-resume = Resume Syncing
+tray-quit = Quit
 
 ## Errors
 
@@ -160,3 +185,4 @@ error-oauth-client-unreadable = Could not read the OAuth client file { $path }: 
 error-invalid-sync-root = The sync folder must be an absolute path: { $path }
 error-not-a-folder = Not a folder: { $id }
 error-sync-in-progress = This account is already being synced, by this or another Next GDrive process.
+error-dbus = Could not use the session bus (D-Bus): { $details }
