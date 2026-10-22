@@ -3,7 +3,9 @@ mod auth;
 mod credentials;
 mod drive;
 mod error;
+mod local_fs;
 mod settings;
+mod sync_state;
 
 pub use account_repository::AccountRepository;
 pub use auth::{
@@ -12,4 +14,6 @@ pub use auth::{
 pub use credentials::CredentialStore;
 pub use drive::{DriveAccountInfo, DriveService};
 pub use error::PortError;
+pub use local_fs::{FileWriter, LocalFileSystem, LocalMetadata};
 pub use settings::SettingsRepository;
+pub use sync_state::{SyncStateStore, SyncedItem, SyncedKind};

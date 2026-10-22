@@ -14,6 +14,11 @@ auth-callback-failure = Sign-in was not completed. Return to Next GDrive and try
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = My Drive
 folder-shared-drives = Shared drives
+sync-summary = { $email }: { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
+sync-conflict = Kept the local version, which changed on this computer: { $path }
+sync-skipped-shortcut = Skipped Drive shortcut: { $path }
+sync-skipped-locked = Skipped, the owner does not allow downloading: { $path }
+sync-failed = Failed: { $path }: { $error }
 
 ## CLI
 
@@ -53,8 +58,12 @@ cli-settings-selection = { $email }: { $count ->
 }
 cli-sync-root-changed = Sync folder changed to { $path }. Files already synced were not moved.
 cli-folder-selected = Folder selected. It will be downloaded on the next sync.
-cli-folder-deselected = Folder deselected. Local copies were kept.
+cli-folder-deselected = Folder deselected. Local copies were kept and will no longer be updated.
 cli-no-folders = No subfolders.
+cli-sync-run-about = Download the selected folders of one or all accounts
+cli-sync-run-email = Only this account (default: all)
+cli-sync-progress = { $done } of { $total } files, { $bytes_done } of { $bytes_total }
+cli-sync-nothing-selected = { $email }: nothing selected. Choose folders with "nextgdrive sync select".
 
 ## GUI
 

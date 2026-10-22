@@ -1,6 +1,8 @@
 use std::time::SystemTime;
 
-use nextgdrive_application::ports::{AccessToken, DriveAccountInfo, DriveService, PortError};
+use nextgdrive_application::ports::{
+    AccessToken, DriveAccountInfo, DriveService, FileWriter, PortError,
+};
 use nextgdrive_domain::{
     Account, AccountId, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind, StorageQuota,
 };
@@ -41,14 +43,8 @@ impl GoogleDrive {
             .send()
             .await
             .map_err(PortError::new)?;
-        let status = response.status();
+        let response = check_status(response).await?;
         let body = response.bytes().await.map_err(PortError::new)?;
-        if !status.is_success() {
-            let message = serde_json::from_slice::<ApiError>(&body)
-                .map(|e| e.error.message)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&body).into_owned());
-            return Err(PortError::new(format!("HTTP {status}: {message}")));
-        }
         serde_json::from_slice(&body).map_err(PortError::new)
     }
 
@@ -78,6 +74,21 @@ impl GoogleDrive {
             }
         }
     }
+}
+
+/// Turns an error response into a `PortError` with Google's message.
+async fn check_status(
+    response: oauth2::reqwest::Response,
+) -> Result<oauth2::reqwest::Response, PortError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = response.bytes().await.map_err(PortError::new)?;
+    let message = serde_json::from_slice::<ApiError>(&body)
+        .map(|e| e.error.message)
+        .unwrap_or_else(|_| String::from_utf8_lossy(&body).into_owned());
+    Err(PortError::new(format!("HTTP {status}: {message}")))
 }
 
 fn endpoint(segments: &[&str]) -> Url {
@@ -239,6 +250,27 @@ impl DriveService for GoogleDrive {
             )
             .await?;
         file_to_item(file)
+    }
+
+    async fn download<W: FileWriter>(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        out: &mut W,
+    ) -> Result<(), PortError> {
+        let response = self
+            .http
+            .get(endpoint(&["files", id.as_str()]))
+            .query(&[("alt", "media"), ("supportsAllDrives", "true")])
+            .bearer_auth(token.secret())
+            .send()
+            .await
+            .map_err(PortError::new)?;
+        let mut response = check_status(response).await?;
+        while let Some(chunk) = response.chunk().await.map_err(PortError::new)? {
+            out.write(&chunk).await?;
+        }
+        Ok(())
     }
 }
 

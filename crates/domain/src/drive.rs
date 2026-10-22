@@ -48,9 +48,14 @@ pub struct DriveItem {
 pub enum ItemKind {
     Folder,
     /// Regular file with downloadable content.
-    File { size: u64, md5: Option<String> },
+    File {
+        size: u64,
+        md5: Option<String>,
+    },
     /// Google Docs, Sheets, Slides, etc.: no file content, only a web page.
-    GoogleDoc { url: String },
+    GoogleDoc {
+        url: String,
+    },
     /// Drive shortcut to another item.
     Shortcut,
     /// Content the user cannot download (e.g. download disabled by the owner).

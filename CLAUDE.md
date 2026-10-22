@@ -29,9 +29,11 @@ Clean Architecture + Hexagonal (Ports & Adapters) in a Cargo workspace with one 
 
 | Crate | Role | May depend on |
 |---|---|---|
-| `domain` | Entities and rules (`Account`, validated `Email`, `StorageQuota`). Pure, no I/O. | nothing internal |
-| `application` | Use cases (`use_cases/`) and the ports they need (`ports/`: `AccountRepository`, `Authenticator`, `CredentialStore`, `DriveService`). | `domain` |
-| `adapter-config` | `AccountRepository` as TOML under XDG config (`~/.config/nextgdrive/accounts.toml`). | `domain`, `application` |
+| `domain` | Entities and rules (`Account`, `Email`, `StorageQuota`, `DriveItem`, `Settings`) and `local_name` (Drive name → valid, unique Linux file name; Google Doc shortcut format). Pure, no I/O. | nothing internal |
+| `application` | Use cases (`use_cases/`), the ports they need (`ports/`), and `TokenProvider` (cached access tokens). | `domain` |
+| `adapter-config` | `AccountRepository` and `SettingsRepository` as TOML under XDG config (`~/.config/nextgdrive/{accounts,settings}.toml`). | `domain`, `application` |
+| `adapter-localfs` | `LocalFileSystem`: downloads go to `.<name>.nextgdrive-part`, fsync, then rename into place. | `domain`, `application` |
+| `adapter-sqlite` | `SyncStateStore` in `~/.local/share/nextgdrive/state.sqlite3` (rusqlite, bundled SQLite). | `domain`, `application` |
 | `adapter-google` | `Authenticator` (OAuth 2.0 for installed apps: PKCE + loopback server on `127.0.0.1:<random port>`) and `DriveService` (Drive API v3). | `domain`, `application` |
 | `adapter-keyring` | `CredentialStore` in the Secret Service keyring via `oo7`. Only refresh tokens are stored, never on disk. | `domain`, `application` |
 | `i18n` | Fluent translations shared by GUI and CLI; maps `AppError`/`DomainError` to messages; formats sizes and quotas. | `domain`, `application` |
@@ -48,6 +50,26 @@ Patterns to follow:
 - Sign-in is two-step (`AddAccount::start` → `pending.url()` → `AddAccount::finish`) so each front-end opens the URL its own way (CLI: print + `xdg-open`; GUI: `gtk::UriLauncher`).
 - GUI threading: GTK stays on the main thread; use cases run on the Tokio runtime from `gui::runtime()`, and results come back through `glib::spawn_future_local` (see the `spawn` helper in `accounts_page.rs`). Never block the main thread on network or keyring calls.
 - GUI and CLI contain no business logic; they call use cases and render results.
+
+### Sync engine (`application/src/use_cases/sync_account.rs`)
+
+Download-only for now (upload is the next phase). Invariants that tests in that file enforce; keep them when changing it:
+
+- A local file whose size or mtime differs from what was recorded at its last sync is **never overwritten or deleted**; it is reported in `SyncReport::conflicts`. Untracked local files are only adopted if their MD5 matches Drive.
+- The full remote tree of every selected folder is listed **before** any local change, so an API failure aborts instead of looking like mass deletion.
+- Each `SyncedItem` remembers the selected folder it was synced under: an item that disappears because its folder was deselected is forgotten (local copy kept); one that disappears while its folder is still selected was removed on Drive and its unchanged local copy is deleted.
+- Downloads are verified against Drive's MD5 before replacing anything. Local mtimes are set to Drive's `modifiedTime`.
+- Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`. The two folder names are translated once and pinned in `settings.toml`.
+- Google Docs/Sheets/etc. become freedesktop `.desktop` links (`Type=Link`); Drive shortcuts and non-downloadable files are skipped and reported.
+
+To exercise the engine against a real account without touching the real setup, isolate everything except the keyring:
+
+```bash
+T=$(mktemp -d); mkdir -p $T/config/nextgdrive
+cp ~/.config/nextgdrive/{accounts.toml,oauth-client.json} $T/config/nextgdrive/
+export XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data
+nextgdrive config sync-root $T/GoogleDrive && nextgdrive sync select <email> <folder-id> && nextgdrive sync run
+```
 
 ### Google OAuth client
 
@@ -71,7 +93,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI (also: account add | status | remove)
+cargo run -p nextgdrive-cli -- account list   # run the CLI: account add|status|remove, config show|sync-root, sync run|folders|select|deselect
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 

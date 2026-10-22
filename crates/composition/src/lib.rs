@@ -10,10 +10,12 @@ use nextgdrive_adapter_google::{
     GoogleAuthenticator, GoogleDrive, http_client,
 };
 use nextgdrive_adapter_keyring::KeyringCredentialStore;
+use nextgdrive_adapter_localfs::Filesystem;
+use nextgdrive_adapter_sqlite::SqliteSyncState;
 use nextgdrive_application::TokenProvider;
 use nextgdrive_application::use_cases::{
     AddAccount, BrowseDrive, ChangeSelection, GetAccountStatus, GetSettings, ListAccounts,
-    RemoveAccount, SetSyncRoot,
+    RemoveAccount, SetSyncRoot, SyncAccount,
 };
 use nextgdrive_domain::Settings;
 use nextgdrive_i18n::Localizer;
@@ -24,6 +26,7 @@ pub type PendingSignIn = nextgdrive_adapter_google::GooglePendingAuthorization;
 pub type Tokens = TokenProvider<GoogleAuthenticator, KeyringCredentialStore>;
 
 pub const OAUTH_CLIENT_FILE: &str = "oauth-client.json";
+const STATE_FILE: &str = "state.sqlite3";
 /// Default sync folder, inside the home directory.
 const DEFAULT_SYNC_DIR: &str = "GoogleDrive";
 
@@ -62,6 +65,8 @@ pub struct Services {
     pub local: LocalServices,
     pub tokens: Tokens,
     pub drive: GoogleDrive,
+    pub fs: Filesystem,
+    pub state: SqliteSyncState,
 }
 
 impl Services {
@@ -78,6 +83,10 @@ impl Services {
         let credentials = KeyringCredentialStore::new()
             .await
             .map_err(|e| i18n.tr_args("error-credentials", [("details", e.to_string().into())]))?;
+        let data =
+            nextgdrive_adapter_config::data_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
+        let state = SqliteSyncState::open(&data.join(STATE_FILE))
+            .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))?;
         let http = http_client();
         Ok(Self {
             local,
@@ -86,6 +95,8 @@ impl Services {
                 credentials,
             ),
             drive: GoogleDrive::new(http),
+            fs: Filesystem,
+            state,
         })
     }
 
@@ -147,6 +158,29 @@ impl Services {
         TomlSettingsRepository,
     > {
         ChangeSelection::new(&self.tokens, &self.drive, &self.local.settings)
+    }
+}
+
+impl Services {
+    #[allow(clippy::type_complexity)]
+    pub fn sync_account(
+        &self,
+    ) -> SyncAccount<
+        '_,
+        GoogleAuthenticator,
+        KeyringCredentialStore,
+        GoogleDrive,
+        Filesystem,
+        TomlSettingsRepository,
+        SqliteSyncState,
+    > {
+        SyncAccount::new(
+            &self.tokens,
+            &self.drive,
+            &self.fs,
+            &self.local.settings,
+            &self.state,
+        )
     }
 }
 

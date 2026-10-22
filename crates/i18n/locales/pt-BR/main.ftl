@@ -14,6 +14,11 @@ auth-callback-failure = O login não foi concluído. Volte ao Next GDrive e tent
 # Folders created inside each account folder. Chosen once, on first use.
 folder-my-drive = Meu Drive
 folder-shared-drives = Drives compartilhados
+sync-summary = { $email }: { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
+sync-conflict = Mantida a versão local, que foi alterada neste computador: { $path }
+sync-skipped-shortcut = Atalho do Drive ignorado: { $path }
+sync-skipped-locked = Ignorado, o proprietário não permite download: { $path }
+sync-failed = Falhou: { $path }: { $error }
 
 ## CLI
 
@@ -53,8 +58,12 @@ cli-settings-selection = { $email }: { $count ->
 }
 cli-sync-root-changed = Pasta de sincronização alterada para { $path }. Os arquivos já sincronizados não foram movidos.
 cli-folder-selected = Pasta selecionada. Ela será baixada na próxima sincronização.
-cli-folder-deselected = Pasta desmarcada. As cópias locais foram mantidas.
+cli-folder-deselected = Pasta desmarcada. As cópias locais foram mantidas e não serão mais atualizadas.
 cli-no-folders = Nenhuma subpasta.
+cli-sync-run-about = Baixar as pastas selecionadas de uma ou de todas as contas
+cli-sync-run-email = Apenas esta conta (padrão: todas)
+cli-sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
+cli-sync-nothing-selected = { $email }: nada selecionado. Escolha pastas com "nextgdrive sync select".
 
 ## GUI
 

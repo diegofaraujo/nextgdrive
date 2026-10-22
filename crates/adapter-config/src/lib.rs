@@ -16,6 +16,11 @@ pub fn config_dir() -> Option<PathBuf> {
     xdg::BaseDirectories::with_prefix(APP_DIR).get_config_home()
 }
 
+/// `$XDG_DATA_HOME/nextgdrive`, usually `~/.local/share/nextgdrive`.
+pub fn data_dir() -> Option<PathBuf> {
+    xdg::BaseDirectories::with_prefix(APP_DIR).get_data_home()
+}
+
 /// Writes to a temporary file first, so a crash never leaves a truncated file behind.
 fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {

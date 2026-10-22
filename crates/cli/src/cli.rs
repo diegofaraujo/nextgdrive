@@ -25,6 +25,9 @@ pub enum ConfigCommand {
 }
 
 pub enum SyncCommand {
+    Run {
+        email: Option<String>,
+    },
     Folders {
         email: String,
         folder: Option<String>,
@@ -120,6 +123,11 @@ fn command(i18n: &Localizer) -> clap::Command {
         .subcommand(
             group("sync", "cli-sync-about")
                 .subcommand(
+                    clap::Command::new("run")
+                        .about(i18n.tr("cli-sync-run-about"))
+                        .arg(email("cli-sync-run-email").required(false)),
+                )
+                .subcommand(
                     clap::Command::new("folders")
                         .about(i18n.tr("cli-sync-folders-about"))
                         .arg(email("cli-account-email"))
@@ -200,6 +208,9 @@ fn from_matches(matches: &ArgMatches) -> Command {
             _ => no_subcommand(),
         }),
         Some(("sync", m)) => Command::Sync(match m.subcommand() {
+            Some(("run", m)) => SyncCommand::Run {
+                email: m.get_one::<String>("email").cloned(),
+            },
             Some(("folders", m)) => SyncCommand::Folders {
                 email: string(m, "email"),
                 folder: m.get_one::<String>("folder").cloned(),

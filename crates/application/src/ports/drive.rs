@@ -2,7 +2,7 @@ use std::future::Future;
 
 use nextgdrive_domain::{Account, Drive, DriveItem, DriveItemId, StorageQuota};
 
-use super::{AccessToken, PortError};
+use super::{AccessToken, FileWriter, PortError};
 
 /// Account details as reported by Google Drive.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,4 +36,12 @@ pub trait DriveService: Sync {
         token: &AccessToken,
         id: &DriveItemId,
     ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
+
+    /// Streams a file's content into `out`.
+    fn download<W: FileWriter>(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        out: &mut W,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }

@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
+
+use md5::{Digest, Md5};
 
 use nextgdrive_domain::{
     Account, AccountId, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind, Settings,
@@ -10,8 +13,8 @@ use nextgdrive_domain::{
 
 use crate::ports::{
     AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, CredentialStore,
-    DriveAccountInfo, DriveService, PendingAuthorization, PortError, RefreshToken,
-    SettingsRepository,
+    DriveAccountInfo, DriveService, FileWriter, LocalFileSystem, LocalMetadata,
+    PendingAuthorization, PortError, RefreshToken, SettingsRepository, SyncStateStore, SyncedItem,
 };
 
 #[derive(Default)]
@@ -178,6 +181,19 @@ impl Authenticator for FakeAuth {
 pub struct FakeDrive {
     account: Account,
     items: BTreeMap<DriveItemId, DriveItem>,
+    contents: BTreeMap<DriveItemId, Vec<u8>>,
+    /// Folder whose listing fails, to simulate API errors.
+    failing: Option<DriveItemId>,
+    /// File whose download returns content that does not match its MD5.
+    corrupt: Option<DriveItemId>,
+    clock: u64,
+}
+
+pub fn md5_hex(content: &[u8]) -> String {
+    Md5::digest(content)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 impl FakeDrive {
@@ -197,7 +213,16 @@ impl FakeDrive {
         Self {
             account,
             items: BTreeMap::from([(root.id.clone(), root)]),
+            contents: BTreeMap::new(),
+            failing: None,
+            corrupt: None,
+            clock: 0,
         }
+    }
+
+    fn tick(&mut self) -> SystemTime {
+        self.clock += 1;
+        SystemTime::UNIX_EPOCH + Duration::from_secs(self.clock)
     }
 
     pub fn with_item(mut self, parent: &str, id: &str, name: &str, kind: ItemKind) -> Self {
@@ -205,7 +230,7 @@ impl FakeDrive {
             id: DriveItemId::new(id),
             name: name.into(),
             kind,
-            modified: SystemTime::UNIX_EPOCH,
+            modified: self.tick(),
             parents: vec![DriveItemId::new(parent)],
         };
         self.items.insert(item.id.clone(), item);
@@ -217,7 +242,51 @@ impl FakeDrive {
     }
 
     pub fn with_file(self, parent: &str, id: &str, name: &str) -> Self {
-        self.with_item(parent, id, name, ItemKind::File { size: 1, md5: None })
+        self.with_content(parent, id, name, name)
+    }
+
+    pub fn with_content(self, parent: &str, id: &str, name: &str, content: &str) -> Self {
+        let kind = ItemKind::File {
+            size: content.len() as u64,
+            md5: Some(md5_hex(content.as_bytes())),
+        };
+        let mut drive = self.with_item(parent, id, name, kind);
+        drive
+            .contents
+            .insert(DriveItemId::new(id), content.as_bytes().to_vec());
+        drive
+    }
+
+    pub fn set_content(&mut self, id: &str, content: &str) {
+        let modified = self.tick();
+        let item = self.items.get_mut(&DriveItemId::new(id)).unwrap();
+        item.kind = ItemKind::File {
+            size: content.len() as u64,
+            md5: Some(md5_hex(content.as_bytes())),
+        };
+        item.modified = modified;
+        self.contents
+            .insert(item.id.clone(), content.as_bytes().to_vec());
+    }
+
+    pub fn rename(&mut self, id: &str, name: &str) {
+        self.items.get_mut(&DriveItemId::new(id)).unwrap().name = name.into();
+    }
+
+    pub fn move_to(&mut self, id: &str, parent: &str) {
+        self.items.get_mut(&DriveItemId::new(id)).unwrap().parents = vec![DriveItemId::new(parent)];
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.items.remove(&DriveItemId::new(id));
+    }
+
+    pub fn fail_listing(&mut self, folder: &str) {
+        self.failing = Some(DriveItemId::new(folder));
+    }
+
+    pub fn corrupt_download(&mut self, id: &str) {
+        self.corrupt = Some(DriveItemId::new(id));
     }
 
     fn check(token: &AccessToken) -> Result<(), PortError> {
@@ -252,6 +321,9 @@ impl DriveService for FakeDrive {
         folder: &DriveItemId,
     ) -> Result<Vec<DriveItem>, PortError> {
         Self::check(token)?;
+        if self.failing.as_ref() == Some(folder) {
+            return Err(PortError::new("listing failed"));
+        }
         Ok(self
             .items
             .values()
@@ -266,6 +338,236 @@ impl DriveService for FakeDrive {
             .get(id)
             .cloned()
             .ok_or_else(|| PortError::new(format!("no item {id}")))
+    }
+
+    async fn download<W: FileWriter>(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        out: &mut W,
+    ) -> Result<(), PortError> {
+        Self::check(token)?;
+        if self.corrupt.as_ref() == Some(id) {
+            return out.write(b"corrupted").await;
+        }
+        let content = self
+            .contents
+            .get(id)
+            .ok_or_else(|| PortError::new("no content"))?;
+        // Several chunks, like a real download.
+        for chunk in content.chunks(3) {
+            out.write(chunk).await?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Node {
+    Dir,
+    File {
+        content: Vec<u8>,
+        modified: SystemTime,
+    },
+}
+
+/// In-memory filesystem. Paths must be absolute.
+#[derive(Default)]
+pub struct FakeFileSystem {
+    nodes: Mutex<BTreeMap<PathBuf, Node>>,
+    clock: AtomicU64,
+}
+
+pub struct FakeWriter {
+    path: PathBuf,
+    content: Vec<u8>,
+}
+
+impl FileWriter for FakeWriter {
+    async fn write(&mut self, chunk: &[u8]) -> Result<(), PortError> {
+        self.content.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    fn md5_hex(&self) -> String {
+        md5_hex(&self.content)
+    }
+}
+
+impl FakeFileSystem {
+    /// Simulates the user writing a file, with a new modification time.
+    pub fn write_local(&self, path: &str, content: &str) {
+        let modified = SystemTime::UNIX_EPOCH
+            + Duration::from_secs(1_000_000 + self.clock.fetch_add(1, Ordering::Relaxed));
+        let path = PathBuf::from(path);
+        self.create_dir_all(path.parent().unwrap()).unwrap();
+        self.nodes.lock().unwrap().insert(
+            path,
+            Node::File {
+                content: content.as_bytes().to_vec(),
+                modified,
+            },
+        );
+    }
+
+    pub fn read(&self, path: &str) -> Option<String> {
+        match self.nodes.lock().unwrap().get(Path::new(path)) {
+            Some(Node::File { content, .. }) => Some(String::from_utf8(content.clone()).unwrap()),
+            _ => None,
+        }
+    }
+
+    pub fn is_dir(&self, path: &str) -> bool {
+        self.nodes.lock().unwrap().get(Path::new(path)) == Some(&Node::Dir)
+    }
+
+    /// Every file, relative to `base`.
+    pub fn files_under(&self, base: &str) -> Vec<String> {
+        self.nodes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, node)| matches!(node, Node::File { .. }))
+            .filter_map(|(path, _)| path.strip_prefix(base).ok())
+            .map(|path| path.display().to_string())
+            .collect()
+    }
+}
+
+fn meta(node: &Node) -> LocalMetadata {
+    match node {
+        Node::Dir => LocalMetadata {
+            is_dir: true,
+            size: 0,
+            modified: SystemTime::UNIX_EPOCH,
+        },
+        Node::File { content, modified } => LocalMetadata {
+            is_dir: false,
+            size: content.len() as u64,
+            modified: *modified,
+        },
+    }
+}
+
+impl LocalFileSystem for FakeFileSystem {
+    type Writer = FakeWriter;
+
+    fn metadata(&self, path: &Path) -> Result<Option<LocalMetadata>, PortError> {
+        Ok(self.nodes.lock().unwrap().get(path).map(meta))
+    }
+
+    fn create_dir_all(&self, path: &Path) -> Result<(), PortError> {
+        let mut nodes = self.nodes.lock().unwrap();
+        for dir in path.ancestors() {
+            match nodes.get(dir) {
+                Some(Node::File { .. }) => {
+                    return Err(PortError::new(format!("{} is a file", dir.display())));
+                }
+                Some(Node::Dir) => {}
+                None => {
+                    nodes.insert(dir.to_owned(), Node::Dir);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn begin_write(&self, path: &Path) -> Result<FakeWriter, PortError> {
+        match self.nodes.lock().unwrap().get(path.parent().unwrap()) {
+            Some(Node::Dir) => Ok(FakeWriter {
+                path: path.to_owned(),
+                content: Vec::new(),
+            }),
+            _ => Err(PortError::new("parent is not a directory")),
+        }
+    }
+
+    async fn commit(
+        &self,
+        writer: FakeWriter,
+        modified: SystemTime,
+    ) -> Result<LocalMetadata, PortError> {
+        let node = Node::File {
+            content: writer.content,
+            modified,
+        };
+        let metadata = meta(&node);
+        self.nodes.lock().unwrap().insert(writer.path, node);
+        Ok(metadata)
+    }
+
+    async fn md5_hex(&self, path: &Path) -> Result<String, PortError> {
+        match self.nodes.lock().unwrap().get(path) {
+            Some(Node::File { content, .. }) => Ok(md5_hex(content)),
+            _ => Err(PortError::new("not a file")),
+        }
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), PortError> {
+        let mut nodes = self.nodes.lock().unwrap();
+        if nodes.contains_key(to) {
+            return Err(PortError::new("target exists"));
+        }
+        let moved: Vec<PathBuf> = nodes
+            .keys()
+            .filter(|p| p.starts_with(from))
+            .cloned()
+            .collect();
+        if moved.is_empty() {
+            return Err(PortError::new("source missing"));
+        }
+        for old in moved {
+            let node = nodes.remove(&old).unwrap();
+            nodes.insert(to.join(old.strip_prefix(from).unwrap()), node);
+        }
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<(), PortError> {
+        match self.nodes.lock().unwrap().remove(path) {
+            Some(Node::File { .. }) => Ok(()),
+            _ => Err(PortError::new("not a file")),
+        }
+    }
+
+    fn remove_dir_if_empty(&self, path: &Path) -> Result<bool, PortError> {
+        let mut nodes = self.nodes.lock().unwrap();
+        if nodes.keys().any(|p| p != path && p.starts_with(path)) {
+            return Ok(false);
+        }
+        Ok(nodes.remove(path).is_some())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemorySyncState(Mutex<HashMap<(AccountId, DriveItemId), SyncedItem>>);
+
+impl SyncStateStore for InMemorySyncState {
+    fn items(&self, account: &AccountId) -> Result<Vec<SyncedItem>, PortError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|((a, _), _)| a == account)
+            .map(|(_, item)| item.clone())
+            .collect())
+    }
+
+    fn upsert(&self, account: &AccountId, item: &SyncedItem) -> Result<(), PortError> {
+        self.0
+            .lock()
+            .unwrap()
+            .insert((account.clone(), item.id.clone()), item.clone());
+        Ok(())
+    }
+
+    fn remove(&self, account: &AccountId, item: &DriveItemId) -> Result<(), PortError> {
+        self.0
+            .lock()
+            .unwrap()
+            .remove(&(account.clone(), item.clone()));
+        Ok(())
     }
 }
 

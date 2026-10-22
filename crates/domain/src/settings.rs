@@ -24,11 +24,16 @@ impl Settings {
     }
 
     pub fn is_selected(&self, account: &AccountId, item: &DriveItemId) -> bool {
-        self.selections.get(account).is_some_and(|s| s.contains(item))
+        self.selections
+            .get(account)
+            .is_some_and(|s| s.contains(item))
     }
 
     pub fn select(&mut self, account: &AccountId, item: DriveItemId) {
-        self.selections.entry(account.clone()).or_default().insert(item);
+        self.selections
+            .entry(account.clone())
+            .or_default()
+            .insert(item);
     }
 
     pub fn deselect(&mut self, account: &AccountId, item: &DriveItemId) {
