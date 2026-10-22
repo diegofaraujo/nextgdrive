@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Arg, ArgAction, ArgMatches, value_parser};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, value_parser};
 use nextgdrive_i18n::Localizer;
 
 pub enum Command {
@@ -39,6 +39,7 @@ pub enum SyncCommand {
     Deselect {
         email: String,
         folder: String,
+        remove_local: bool,
     },
 }
 
@@ -147,7 +148,25 @@ fn command(i18n: &Localizer) -> clap::Command {
                     clap::Command::new("deselect")
                         .about(i18n.tr("cli-sync-deselect-about"))
                         .arg(email("cli-account-email"))
-                        .arg(folder()),
+                        .arg(folder())
+                        .arg(
+                            Arg::new("keep-local")
+                                .long("keep-local")
+                                .action(ArgAction::SetTrue)
+                                .help(i18n.tr("cli-sync-keep-local")),
+                        )
+                        .arg(
+                            Arg::new("remove-local")
+                                .long("remove-local")
+                                .action(ArgAction::SetTrue)
+                                .help(i18n.tr("cli-sync-remove-local")),
+                        )
+                        // The user must choose explicitly what happens to downloaded files.
+                        .group(
+                            ArgGroup::new("local-copies")
+                                .args(["keep-local", "remove-local"])
+                                .required(true),
+                        ),
                 ),
         );
     localize_headings(root, i18n)
@@ -222,6 +241,7 @@ fn from_matches(matches: &ArgMatches) -> Command {
             Some(("deselect", m)) => SyncCommand::Deselect {
                 email: string(m, "email"),
                 folder: string(m, "folder"),
+                remove_local: m.get_flag("remove-local"),
             },
             _ => no_subcommand(),
         }),
@@ -238,6 +258,31 @@ mod tests {
             .try_get_matches_from(std::iter::once("nextgdrive").chain(args.iter().copied()))
             .unwrap();
         from_matches(&matches)
+    }
+
+    #[test]
+    fn deselect_requires_choosing_what_happens_to_local_copies() {
+        let parse = |args: &[&str]| {
+            command(&Localizer::new("en-US"))
+                .try_get_matches_from(std::iter::once("nextgdrive").chain(args.iter().copied()))
+                .is_ok()
+        };
+        assert!(!parse(&["sync", "deselect", "ana@x.com", "abc"]));
+        assert!(!parse(&[
+            "sync",
+            "deselect",
+            "ana@x.com",
+            "abc",
+            "--keep-local",
+            "--remove-local"
+        ]));
+        assert!(parse(&[
+            "sync",
+            "deselect",
+            "ana@x.com",
+            "abc",
+            "--keep-local"
+        ]));
     }
 
     #[test]
@@ -258,6 +303,13 @@ mod tests {
         assert!(matches!(
             parse_args(&["sync", "select", "ana@x.com", "abc"]),
             Command::Sync(SyncCommand::Select { folder, .. }) if folder == "abc"
+        ));
+        assert!(matches!(
+            parse_args(&["sync", "deselect", "ana@x.com", "abc", "--remove-local"]),
+            Command::Sync(SyncCommand::Deselect {
+                remove_local: true,
+                ..
+            })
         ));
         assert!(matches!(
             parse_args(&["config", "sync-root", "/data"]),

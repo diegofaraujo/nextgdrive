@@ -18,6 +18,7 @@ use crate::ports::{
     AccessToken, Authenticator, CredentialStore, DriveService, FileWriter, LocalFileSystem,
     LocalMetadata, PortError, SettingsRepository, SyncStateStore, SyncedItem, SyncedKind,
 };
+use crate::use_cases::local_copies::{Removal, remove_local_copy, unchanged};
 use crate::{AppError, TokenProvider};
 
 /// Guards against malformed parent chains in Drive.
@@ -272,26 +273,17 @@ where
             self.state
                 .remove(&account.id, &synced.id)
                 .map_err(AppError::Storage)?;
-            // Deselected: keep the local copy, just stop tracking it.
+            // Deselected: what to do with local copies was decided then
+            // (see `ChangeSelection::deselect`); just stop tracking.
             if !settings.is_selected(&account.id, &synced.selection) {
                 continue;
             }
             let path = dir.join(&synced.path);
-            match (synced.kind, self.fs.metadata(&path)) {
-                (_, Ok(None)) => {}
-                (SyncedKind::Folder, Ok(Some(_))) => match self.fs.remove_dir_if_empty(&path) {
-                    Ok(true) => report.removed += 1,
-                    Ok(false) => {}
-                    Err(e) => report.failures.push((path, AppError::Storage(e))),
-                },
-                (_, Ok(Some(meta))) if unchanged(&synced, &meta) => {
-                    match self.fs.remove_file(&path) {
-                        Ok(()) => report.removed += 1,
-                        Err(e) => report.failures.push((path, AppError::Storage(e))),
-                    }
-                }
-                (_, Ok(Some(_))) => report.conflicts.push(path),
-                (_, Err(e)) => report.failures.push((path, AppError::Storage(e))),
+            match remove_local_copy(self.fs, &path, &synced) {
+                Ok(Removal::Removed) => report.removed += 1,
+                Ok(Removal::KeptChanged) => report.conflicts.push(path),
+                Ok(Removal::KeptNotEmpty | Removal::Absent) => {}
+                Err(e) => report.failures.push((path, AppError::Storage(e))),
             }
         }
         Ok(())
@@ -602,11 +594,6 @@ fn drive_folder(settings: &Settings, drives: &[Drive], drive: &Drive) -> PathBuf
             PathBuf::from(&settings.shared_drives_folder).join(&names[&drive.root])
         }
     }
-}
-
-/// Whether the local copy is still exactly what was written at the last sync.
-fn unchanged(synced: &SyncedItem, local: &LocalMetadata) -> bool {
-    !local.is_dir && local.size == synced.local_size && local.modified == synced.local_modified
 }
 
 fn remote_changed(synced: &SyncedItem, item: &DriveItem) -> bool {

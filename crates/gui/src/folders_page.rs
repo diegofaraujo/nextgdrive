@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use nextgdrive_application::AppError;
+use nextgdrive_application::use_cases::LocalCopies;
 use nextgdrive_domain::{Account, DriveItemId, DriveKind};
+use nextgdrive_i18n::FluentValue;
 
 use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
 
@@ -160,13 +162,13 @@ impl FoldersPage {
         // Set while undoing a failed change, so the undo is not sent again.
         let reverting = Rc::new(Cell::new(false));
         let weak = Rc::downgrade(self);
-        let id = entry.id.clone();
+        let (id, name) = (entry.id.clone(), entry.name.clone());
         check.connect_toggled(move |check| {
             if reverting.get() {
                 return;
             }
             if let Some(page) = weak.upgrade() {
-                page.change(check, &id, reverting.clone());
+                page.toggled(check, &id, &name, reverting.clone());
             }
         });
 
@@ -186,33 +188,37 @@ impl FoldersPage {
         row
     }
 
-    fn change(
+    fn toggled(
+        self: &Rc<Self>,
+        check: &gtk::CheckButton,
+        id: &DriveItemId,
+        name: &str,
+        reverting: Rc<Cell<bool>>,
+    ) {
+        if check.is_active() {
+            self.select(check, id, reverting);
+        } else {
+            self.ask_deselect(check, id, name, reverting);
+        }
+    }
+
+    fn select(
         self: &Rc<Self>,
         check: &gtk::CheckButton,
         id: &DriveItemId,
         reverting: Rc<Cell<bool>>,
     ) {
-        let selected = check.is_active();
         let services = self.ctx.services.clone();
         let (account, id) = (self.account.clone(), id.clone());
         let (weak, check) = (Rc::downgrade(self), check.downgrade());
         check.upgrade().inspect(|c| c.set_sensitive(false));
         spawn(
-            async move {
-                let change = services.change_selection();
-                if selected {
-                    change.select(&account, &id).await
-                } else {
-                    change.deselect(&account, &id)
-                }
-            },
+            async move { services.change_selection().select(&account, &id).await },
             move |result| {
                 let Some(check) = check.upgrade() else { return };
                 check.set_sensitive(true);
                 if let Err(e) = result {
-                    reverting.set(true);
-                    check.set_active(!selected);
-                    reverting.set(false);
+                    revert(&check, &reverting);
                     if let Some(page) = weak.upgrade() {
                         page.ctx.toast(&page.ctx.i18n.app_error(&e));
                     }
@@ -220,4 +226,95 @@ impl FoldersPage {
             },
         );
     }
+
+    /// Asks what to do with the downloaded files before deselecting.
+    fn ask_deselect(
+        self: &Rc<Self>,
+        check: &gtk::CheckButton,
+        id: &DriveItemId,
+        name: &str,
+        reverting: Rc<Cell<bool>>,
+    ) {
+        let i18n = &self.ctx.i18n;
+        let dialog = adw::AlertDialog::new(
+            Some(&i18n.tr_args("gui-deselect-title", [("name", name.to_owned().into())])),
+            Some(&i18n.tr("gui-deselect-body")),
+        );
+        dialog.add_responses(&[
+            ("cancel", &i18n.tr("gui-cancel")),
+            ("keep", &i18n.tr("gui-deselect-keep")),
+            ("remove", &i18n.tr("gui-deselect-remove")),
+        ]);
+        dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        let (weak, check_ref, id) = (Rc::downgrade(self), check.downgrade(), id.clone());
+        dialog.connect_response(None, move |_, response| {
+            let Some(check) = check_ref.upgrade() else {
+                return;
+            };
+            let copies = match response {
+                "keep" => LocalCopies::Keep,
+                "remove" => LocalCopies::Remove,
+                _ => return revert(&check, &reverting),
+            };
+            if let Some(page) = weak.upgrade() {
+                page.deselect(&check, &id, copies, reverting.clone());
+            }
+        });
+        dialog.present(Some(check));
+    }
+
+    fn deselect(
+        self: &Rc<Self>,
+        check: &gtk::CheckButton,
+        id: &DriveItemId,
+        copies: LocalCopies,
+        reverting: Rc<Cell<bool>>,
+    ) {
+        let services = self.ctx.services.clone();
+        let (account, id) = (self.account.clone(), id.clone());
+        let (weak, check) = (Rc::downgrade(self), check.downgrade());
+        check.upgrade().inspect(|c| c.set_sensitive(false));
+        spawn(
+            async move { services.change_selection().deselect(&account, &id, copies) },
+            move |result| {
+                let Some(check) = check.upgrade() else { return };
+                check.set_sensitive(true);
+                let Some(page) = weak.upgrade() else { return };
+                let i18n = &page.ctx.i18n;
+                match result {
+                    Ok(_) if copies == LocalCopies::Keep => {
+                        page.ctx.toast(&i18n.tr("gui-deselect-kept-files"))
+                    }
+                    Ok(report) => {
+                        let mut message = i18n.tr_args(
+                            "gui-deselect-removed",
+                            [("removed", FluentValue::from(report.removed))],
+                        );
+                        if !report.kept.is_empty() {
+                            let kept = i18n.tr_args(
+                                "gui-deselect-kept",
+                                [("count", FluentValue::from(report.kept.len()))],
+                            );
+                            message = format!("{message}. {kept}");
+                        }
+                        page.ctx.toast(&message);
+                    }
+                    Err(e) => {
+                        revert(&check, &reverting);
+                        page.ctx.toast(&i18n.app_error(&e));
+                    }
+                }
+            },
+        );
+    }
+}
+
+/// Puts a checkbox back without treating it as a new change.
+fn revert(check: &gtk::CheckButton, reverting: &Cell<bool>) {
+    reverting.set(true);
+    check.set_active(!check.is_active());
+    reverting.set(false);
 }
