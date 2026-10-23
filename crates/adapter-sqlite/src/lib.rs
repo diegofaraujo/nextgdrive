@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS synced_items (
     remote_md5      TEXT,
     local_size      INTEGER NOT NULL,
     local_modified  INTEGER NOT NULL,
+    local_inode     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, item_id)
 );
 CREATE TABLE IF NOT EXISTS cursors (
@@ -44,6 +45,7 @@ impl SqliteSyncState {
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(PortError::new)?;
         connection.execute_batch(SCHEMA).map_err(PortError::new)?;
+        migrate(&connection).map_err(PortError::new)?;
         let lock_dir = path.with_file_name("locks");
         std::fs::create_dir_all(&lock_dir).map_err(PortError::new)?;
         Ok(Self {
@@ -59,6 +61,20 @@ impl SqliteSyncState {
             .map_err(|_| PortError::new("state lock poisoned"))?;
         f(&connection).map_err(PortError::new)
     }
+}
+
+/// Brings databases created by older versions up to date.
+fn migrate(connection: &Connection) -> rusqlite::Result<()> {
+    let has_inode = connection
+        .prepare("SELECT 1 FROM pragma_table_info('synced_items') WHERE name = 'local_inode'")?
+        .exists([])?;
+    if !has_inode {
+        // 0 means unknown; sync fills it in.
+        connection.execute_batch(
+            "ALTER TABLE synced_items ADD COLUMN local_inode INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    Ok(())
 }
 
 /// Nanoseconds since the Unix epoch: exact enough to compare file mtimes.
@@ -99,6 +115,7 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<SyncedItem> {
         remote_md5: row.get("remote_md5")?,
         local_size: u64::try_from(size).unwrap_or(0),
         local_modified: from_nanos(row.get("local_modified")?),
+        local_inode: u64::try_from(row.get::<_, i64>("local_inode")?).unwrap_or(0),
     })
 }
 
@@ -176,8 +193,8 @@ impl SyncStateStore for SqliteSyncState {
         self.with(|c| {
             c.prepare_cached(
                 "INSERT OR REPLACE INTO synced_items
-                 (account_id, item_id, selection_id, path, kind, remote_modified, remote_md5, local_size, local_modified)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 (account_id, item_id, selection_id, path, kind, remote_modified, remote_md5, local_size, local_modified, local_inode)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?
             .execute(params![
                 account.as_str(),
@@ -189,6 +206,7 @@ impl SyncStateStore for SqliteSyncState {
                 item.remote_md5,
                 i64::try_from(item.local_size).unwrap_or(i64::MAX),
                 to_nanos(item.local_modified),
+                i64::try_from(item.local_inode).unwrap_or(0),
             ])
             .map(drop)
         })
@@ -231,6 +249,7 @@ mod tests {
             remote_md5: Some("abc".into()),
             local_size: 42,
             local_modified: SystemTime::UNIX_EPOCH + Duration::new(1_700_000_001, 987),
+            local_inode: 1234,
         }
     }
 
@@ -284,6 +303,31 @@ mod tests {
         state.set_cursor(&ana, "41").unwrap();
         state.set_cursor(&ana, "42").unwrap();
         assert_eq!(state.cursor(&ana).unwrap().as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn upgrades_databases_without_inodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.sqlite3");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE synced_items (account_id TEXT NOT NULL, item_id TEXT NOT NULL, selection_id TEXT NOT NULL,
+                 path TEXT NOT NULL, kind TEXT NOT NULL, remote_modified INTEGER NOT NULL, remote_md5 TEXT,
+                 local_size INTEGER NOT NULL, local_modified INTEGER NOT NULL, PRIMARY KEY (account_id, item_id));
+                 INSERT INTO synced_items VALUES ('ana', '1', 'sel', 'a', 'file', 0, NULL, 1, 0);",
+            )
+            .unwrap();
+
+        let state = SqliteSyncState::open(&path).unwrap();
+
+        assert_eq!(
+            state.items(&AccountId::new("ana")).unwrap()[0].local_inode,
+            0
+        );
+        state
+            .upsert(&AccountId::new("ana"), &item("2", "b"))
+            .unwrap();
     }
 
     #[test]

@@ -11,7 +11,7 @@ use nextgdrive_adapter_dbus::Client;
 use nextgdrive_application::AppError;
 use nextgdrive_application::ports::{AccountRepository, PendingAuthorization};
 use nextgdrive_application::use_cases::{
-    ConflictReason, LocalCopies, SkipReason, SyncProgress, SyncReport,
+    Deletions, LocalCopies, SkipReason, SyncOptions, SyncProgress, SyncReport,
 };
 use nextgdrive_composition::host::{self, StartError, SyncHost};
 use nextgdrive_composition::{LocalServices, Services};
@@ -175,9 +175,10 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
                 )
             );
         }
-        Command::Sync(SyncCommand::Run { email }) => {
+        Command::Sync(SyncCommand::Run { email, deletions }) => {
             // Let the process running in the background do it, if there is one.
             if email.is_none()
+                && deletions == Deletions::Ask
                 && let Some(client) = Client::connect().await
             {
                 client
@@ -219,9 +220,13 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
                         let _ = std::io::stderr().flush();
                     }
                 };
+                let options = SyncOptions {
+                    conflict_label: nextgdrive_composition::conflict_label(i18n),
+                    deletions,
+                };
                 let result = services
                     .sync_account()
-                    .execute(&account, &on_progress)
+                    .execute(&account, &options, &on_progress)
                     .await;
                 if show_progress {
                     eprint!("\r\x1b[2K");
@@ -385,12 +390,14 @@ fn progress_line(i18n: &Localizer, p: &SyncProgress) -> String {
 /// Prints the outcome of an account's sync. Returns whether anything failed.
 fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> bool {
     let path = |p: &std::path::Path| FluentValue::from(p.display().to_string());
+    for copy in &report.conflict_copies {
+        eprintln!(
+            "{}",
+            i18n.tr_args("sync-conflict-copy", [("path", path(copy))])
+        );
+    }
     for conflict in &report.conflicts {
-        let id = match conflict.reason {
-            ConflictReason::ChangedLocally => "sync-conflict",
-            ConflictReason::AlreadyExists => "sync-conflict-exists",
-        };
-        eprintln!("{}", i18n.tr_args(id, [("path", path(&conflict.path))]));
+        eprintln!("{}", i18n.conflict_line(conflict));
     }
     for (skipped, reason) in &report.skipped {
         let id = match reason {
@@ -411,19 +418,7 @@ fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> boo
             )
         );
     }
-    println!(
-        "{}",
-        i18n.tr_args(
-            "sync-summary",
-            [
-                ("email", account.email.to_string().into()),
-                ("downloaded", FluentValue::from(report.downloaded)),
-                ("bytes", i18n.bytes(report.downloaded_bytes).into()),
-                ("moved", FluentValue::from(report.moved)),
-                ("removed", FluentValue::from(report.removed)),
-            ]
-        )
-    );
+    println!("{}: {}", account.email, i18n.sync_summary(report));
     !report.failures.is_empty()
 }
 

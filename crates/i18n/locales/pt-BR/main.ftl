@@ -15,10 +15,39 @@ auth-callback-failure = O login não foi concluído. Volte ao Next GDrive e tent
 folder-my-drive = Meu Drive
 folder-shared-drives = Drives compartilhados
 sync-progress = { $done } de { $total } arquivos, { $bytes_done } de { $bytes_total }
+sync-part-downloaded = { $count ->
+    [one] 1 baixado ({ $bytes })
+   *[other] { $count } baixados ({ $bytes })
+}
+sync-part-uploaded = { $count ->
+    [one] 1 enviado ({ $bytes })
+   *[other] { $count } enviados ({ $bytes })
+}
+sync-part-moved = { $count ->
+    [one] 1 movido
+   *[other] { $count } movidos
+}
+sync-part-removed = { $count ->
+    [one] 1 removido deste computador
+   *[other] { $count } removidos deste computador
+}
+sync-part-trashed = { $count ->
+    [one] 1 enviado para a lixeira do Drive
+   *[other] { $count } enviados para a lixeira do Drive
+}
+sync-part-copies = { $count ->
+    [one] 1 cópia em conflito
+   *[other] { $count } cópias em conflito
+}
+sync-part-nothing = nada mudou
+sync-conflict-copy = Alterado aqui e no Google Drive; a sua versão foi mantida como { $path }
+conflict-type-clash = Mantido como está: um arquivo e uma pasta têm o mesmo nome
+conflict-read-only = As suas alterações ficam neste computador: você não pode editar este arquivo no Google Drive
+conflict-cannot-delete = Restaurado: você não pode apagar este item no Google Drive
 sync-started = { $email }: sincronizando…
-sync-summary = { $email }: { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
+# Inserted in file names, e.g. "report (conflict copy 2026-10-23 14-30).pdf".
+conflict-copy-label = cópia em conflito { $date }
 sync-conflict = Mantida a versão local, que foi alterada neste computador: { $path }
-sync-conflict-exists = Mantido o arquivo local existente, que é diferente do Drive e não foi criado pelo Next GDrive: { $path }
 sync-skipped-shortcut = Atalho do Drive ignorado: { $path }
 sync-skipped-locked = Ignorado, o proprietário não permite download: { $path }
 sync-failed = Falhou: { $path }: { $error }
@@ -71,7 +100,7 @@ cli-settings-selection = { $email }: { $count ->
     [one] 1 pasta selecionada
    *[other] { $count } pastas selecionadas
 }
-cli-sync-root-changed = Pasta de sincronização alterada para { $path }. Os arquivos já sincronizados não foram movidos.
+cli-sync-root-changed = Pasta de sincronização alterada para { $path }. Os arquivos sincronizados foram movidos para lá.
 cli-folder-selected = Pasta selecionada. Ela será baixada na próxima sincronização.
 cli-folder-deselected = Pasta desmarcada. As cópias locais foram mantidas e não serão mais atualizadas.
 cli-no-folders = Nenhuma subpasta.
@@ -91,6 +120,8 @@ cli-status-about = Mostrar o que o Next GDrive está fazendo em segundo plano
 cli-status-not-running = O Next GDrive não está rodando em segundo plano. Abra o aplicativo ou execute "nextgdrive daemon".
 cli-sync-requested = Pedido enviado ao Next GDrive em segundo plano para sincronizar agora.
 cli-daemon-already-running = O Next GDrive já está rodando em segundo plano (o aplicativo na bandeja do sistema, ou outro "nextgdrive daemon").
+cli-sync-confirm-deletions = Enviar para a lixeira do Google Drive os arquivos apagados neste computador, mesmo que sejam muitos
+cli-sync-restore-deletions = Baixar de novo os arquivos apagados neste computador em vez de mandá-los para a lixeira do Google Drive
 
 ## GUI
 
@@ -122,17 +153,17 @@ gui-folders-count = { $count ->
 gui-folders-description = Tudo o que estiver dentro de uma pasta selecionada é baixado para este computador.
 gui-folders-inherited = Sincronizada porque uma pasta acima dela está selecionada.
 gui-no-subfolders = Nenhuma subpasta
-gui-sync-title = Download
 gui-sync-now = Sincronizar agora
 gui-sync-never = Ainda não sincronizado nesta sessão
 gui-syncing = Sincronizando…
-gui-sync-result = { $downloaded } baixados ({ $bytes }), { $moved } movidos, { $removed } removidos
 gui-report-conflicts = { $count ->
-    [one] 1 arquivo local não foi substituído
-   *[other] { $count } arquivos locais não foram substituídos
+    [one] 1 item precisa de atenção
+   *[other] { $count } itens precisam de atenção
 }
-gui-conflict-changed = Alterado neste computador
-gui-conflict-exists = Já existia um arquivo diferente aqui
+gui-report-copies = { $count ->
+    [one] 1 arquivo alterado nos dois lados, mantido como cópia em conflito
+   *[other] { $count } arquivos alterados nos dois lados, mantidos como cópias em conflito
+}
 gui-report-failures = { $count ->
     [one] 1 item falhou
    *[other] { $count } itens falharam
@@ -146,7 +177,7 @@ gui-skipped-locked = O proprietário não permite download
 gui-open-folder = Abrir pasta
 gui-sync-root = Pasta de sincronização
 gui-sync-root-change = Alterar…
-gui-sync-root-note = Cada conta ganha a sua própria pasta dentro dela. Os arquivos já sincronizados ficam onde estão; a próxima sincronização baixa para a nova pasta.
+gui-sync-root-note = Cada conta ganha a sua própria pasta dentro dela. Ao alterá-la, os arquivos sincronizados são movidos.
 gui-deselect-title = Parar de sincronizar “{ $name }”?
 gui-deselect-body = Os arquivos baixados podem ser removidos deste computador, continuando disponíveis no Google Drive, ou mantidos como arquivos comuns que não serão mais atualizados. Arquivos que você alterou neste computador são sempre mantidos.
 gui-deselect-keep = Manter arquivos
@@ -169,6 +200,11 @@ tray-sync-now = Sincronizar agora
 tray-pause = Pausar sincronização
 tray-resume = Retomar sincronização
 tray-quit = Sair
+gui-deletions-title = { $count } arquivos apagados neste computador
+gui-deletions-body = Mandá-los também para a lixeira do Google Drive, onde podem ser restaurados por 30 dias? Ou baixá-los de novo?
+gui-deletions-restore = Restaurar arquivos
+gui-deletions-trash = Mover para a lixeira
+gui-sync-title = Sincronização
 
 ## Errors
 
@@ -186,3 +222,6 @@ error-invalid-sync-root = A pasta de sincronização precisa ser um caminho abso
 error-not-a-folder = Não é uma pasta: { $id }
 error-sync-in-progress = Esta conta já está sendo sincronizada, por este ou por outro processo do Next GDrive.
 error-dbus = Não foi possível usar o barramento da sessão (D-Bus): { $details }
+error-local-folder-missing = A pasta sincronizada { $path } não foi encontrada (um disco desmontado?). Nada foi alterado no Google Drive; a sincronização continua quando a pasta voltar.
+error-mass-deletion = { $count } arquivos foram apagados neste computador. Confirme antes de eles irem para a lixeira do Google Drive, ou restaure-os.
+error-folder-exists = Já existe uma pasta em { $path }. Escolha outro local, ou mova ou remova essa pasta antes.

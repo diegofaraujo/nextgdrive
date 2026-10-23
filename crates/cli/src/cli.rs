@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, value_parser};
+use nextgdrive_application::use_cases::Deletions;
 use nextgdrive_i18n::Localizer;
 
 pub enum Command {
@@ -29,6 +30,7 @@ pub enum ConfigCommand {
 pub enum SyncCommand {
     Run {
         email: Option<String>,
+        deletions: Deletions,
     },
     Folders {
         email: String,
@@ -130,7 +132,23 @@ fn command(i18n: &Localizer) -> clap::Command {
                 .subcommand(
                     clap::Command::new("run")
                         .about(i18n.tr("cli-sync-run-about"))
-                        .arg(email("cli-sync-run-email").required(false)),
+                        .arg(email("cli-sync-run-email").required(false))
+                        .arg(
+                            Arg::new("confirm-deletions")
+                                .long("confirm-deletions")
+                                .action(ArgAction::SetTrue)
+                                .help(i18n.tr("cli-sync-confirm-deletions")),
+                        )
+                        .arg(
+                            Arg::new("restore-deletions")
+                                .long("restore-deletions")
+                                .action(ArgAction::SetTrue)
+                                .help(i18n.tr("cli-sync-restore-deletions")),
+                        )
+                        .group(
+                            ArgGroup::new("deletions")
+                                .args(["confirm-deletions", "restore-deletions"]),
+                        ),
                 )
                 .subcommand(
                     clap::Command::new("folders")
@@ -235,6 +253,13 @@ fn from_matches(matches: &ArgMatches) -> Command {
         Some(("sync", m)) => Command::Sync(match m.subcommand() {
             Some(("run", m)) => SyncCommand::Run {
                 email: m.get_one::<String>("email").cloned(),
+                deletions: if m.get_flag("confirm-deletions") {
+                    Deletions::Trash
+                } else if m.get_flag("restore-deletions") {
+                    Deletions::Restore
+                } else {
+                    Deletions::Ask
+                },
             },
             Some(("folders", m)) => SyncCommand::Folders {
                 email: string(m, "email"),

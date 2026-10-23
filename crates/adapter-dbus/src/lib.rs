@@ -38,6 +38,8 @@ pub trait HostControl: Send + Sync + 'static {
     fn sync_now(&self);
     fn pause(&self);
     fn resume(&self);
+    /// Many files of this account were deleted locally: trash them in Drive.
+    fn confirm_deletions(&self, email: &str);
 }
 
 struct Service(Arc<dyn HostControl>);
@@ -58,6 +60,10 @@ impl Service {
 
     fn resume(&self) {
         self.0.resume();
+    }
+
+    fn confirm_deletions(&self, email: &str) {
+        self.0.confirm_deletions(email);
     }
 }
 
@@ -98,6 +104,7 @@ trait Sync1 {
     fn sync_now(&self) -> zbus::Result<()>;
     fn pause(&self) -> zbus::Result<()>;
     fn resume(&self) -> zbus::Result<()>;
+    fn confirm_deletions(&self, email: &str) -> zbus::Result<()>;
 }
 
 /// Controls the process running background sync.
@@ -130,6 +137,10 @@ impl Client {
     pub async fn resume(&self) -> zbus::Result<()> {
         self.0.resume().await
     }
+
+    pub async fn confirm_deletions(&self, email: &str) -> zbus::Result<()> {
+        self.0.confirm_deletions(email).await
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +171,9 @@ mod tests {
         }
         fn resume(&self) {
             self.0.lock().unwrap().push("resume");
+        }
+        fn confirm_deletions(&self, _: &str) {
+            self.0.lock().unwrap().push("confirm");
         }
     }
 

@@ -2,18 +2,54 @@
 
 use std::fs;
 use std::io::{self, ErrorKind};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use md5::{Digest, Md5};
-use nextgdrive_application::ports::{FileWriter, LocalFileSystem, LocalMetadata, PortError};
+use nextgdrive_application::ports::{
+    DirEntry, FileReader, FileWriter, LocalFileSystem, LocalMetadata, PortError,
+};
+/// Files being downloaded are hidden (leading dot) and only renamed to their
+/// real name once complete; sync ignores them.
+pub use nextgdrive_domain::local_name::PARTIAL_SUFFIX;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 
-/// Suffix of files being downloaded. They are hidden (leading dot) and only
-/// renamed to their real name once complete.
-pub const PARTIAL_SUFFIX: &str = ".nextgdrive-part";
-
 pub struct Filesystem;
+
+/// Watches a folder tree (inotify) while alive.
+pub struct ChangeWatcher {
+    _watcher: notify::RecommendedWatcher,
+}
+
+/// Calls `on_change` whenever something under `root` is created, changed,
+/// moved or deleted, except for names sync ignores (such as partial downloads).
+pub fn watch(
+    root: &Path,
+    on_change: impl Fn() + Send + 'static,
+) -> Result<ChangeWatcher, PortError> {
+    use notify::{EventKind, RecursiveMode, Watcher};
+
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else { return };
+        if matches!(event.kind, EventKind::Access(_) | EventKind::Other) {
+            return;
+        }
+        let relevant = event.paths.iter().any(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|name| !nextgdrive_domain::local_name::is_ignored(name))
+        });
+        if relevant {
+            on_change();
+        }
+    })
+    .map_err(PortError::new)?;
+    watcher
+        .watch(root, RecursiveMode::Recursive)
+        .map_err(PortError::new)?;
+    Ok(ChangeWatcher { _watcher: watcher })
+}
 
 pub struct Writer {
     target: PathBuf,
@@ -40,7 +76,29 @@ fn to_metadata(meta: &fs::Metadata) -> io::Result<LocalMetadata> {
         is_dir: meta.is_dir(),
         size: meta.len(),
         modified: meta.modified()?,
+        inode: meta.ino(),
     })
+}
+
+pub struct Reader(tokio::fs::File);
+
+impl FileReader for Reader {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, PortError> {
+        // `read` may return less than asked; fill the buffer unless at the end.
+        let mut filled = 0;
+        while filled < buf.len() {
+            match self
+                .0
+                .read(&mut buf[filled..])
+                .await
+                .map_err(PortError::new)?
+            {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        Ok(filled)
+    }
 }
 
 fn hex(digest: &[u8]) -> String {
@@ -69,6 +127,33 @@ impl FileWriter for Writer {
 
 impl LocalFileSystem for Filesystem {
     type Writer = Writer;
+    type Reader = Reader;
+
+    fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, PortError> {
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(path).map_err(|e| error(path, e))? {
+            let entry = entry.map_err(|e| error(path, e))?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue; // Not valid UTF-8: Drive names cannot represent it.
+            };
+            // Symbolic links are not followed: they could point outside the
+            // synced folder, or loop.
+            let meta = entry.metadata().map_err(|e| error(&entry.path(), e))?;
+            if meta.file_type().is_symlink() || !(meta.is_file() || meta.is_dir()) {
+                continue;
+            }
+            let metadata = to_metadata(&meta).map_err(|e| error(&entry.path(), e))?;
+            entries.push(DirEntry { name, metadata });
+        }
+        Ok(entries)
+    }
+
+    async fn open_read(&self, path: &Path) -> Result<Reader, PortError> {
+        let file = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| error(path, e))?;
+        Ok(Reader(file))
+    }
 
     fn metadata(&self, path: &Path) -> Result<Option<LocalMetadata>, PortError> {
         match fs::metadata(path).and_then(|m| to_metadata(&m)) {
@@ -215,6 +300,68 @@ mod tests {
         assert!(!Filesystem.has_content(&path, b"diff").await.unwrap());
         assert!(!Filesystem.has_content(&path, b"longer").await.unwrap());
         assert!(!Filesystem.has_content(dir.path(), b"").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn lists_entries_without_symlinks_and_reads_them() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink("/etc", dir.path().join("link")).unwrap();
+
+        let mut names: Vec<_> = Filesystem
+            .list_dir(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name, e.metadata.is_dir))
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [("a.txt".to_owned(), false), ("sub".to_owned(), true)]
+        );
+
+        let mut reader = Filesystem
+            .open_read(&dir.path().join("a.txt"))
+            .await
+            .unwrap();
+        let mut buf = [0; 3];
+        assert_eq!(reader.read(&mut buf).await.unwrap(), 3);
+        assert_eq!(&buf, b"hel");
+        assert_eq!(reader.read(&mut buf).await.unwrap(), 2);
+        assert_eq!(reader.read(&mut buf).await.unwrap(), 0);
+    }
+
+    #[test]
+    fn rename_keeps_the_inode() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        fs::write(&a, "a").unwrap();
+        let before = Filesystem.metadata(&a).unwrap().unwrap().inode;
+        Filesystem.rename(&a, &b).unwrap();
+        assert_eq!(Filesystem.metadata(&b).unwrap().unwrap().inode, before);
+    }
+
+    #[test]
+    fn watcher_reports_changes_but_not_ignored_files() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let _watcher = watch(dir.path(), move || {
+            let _ = tx.send(());
+        })
+        .unwrap();
+
+        fs::write(dir.path().join(".a.txt.nextgdrive-part"), "partial").unwrap();
+        assert!(
+            rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "partial file triggered"
+        );
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub/b.txt"), "b").unwrap();
+        assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok());
     }
 
     #[test]

@@ -7,14 +7,15 @@ use std::time::{Duration, SystemTime};
 use md5::{Digest, Md5};
 
 use nextgdrive_domain::{
-    Account, AccountId, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind, Settings,
-    StorageQuota,
+    Account, AccountId, Capabilities, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind,
+    Settings, StorageQuota,
 };
 
 use crate::ports::{
     AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, Changes,
-    CredentialStore, DriveAccountInfo, DriveService, FileWriter, LocalFileSystem, LocalMetadata,
-    PendingAuthorization, PortError, RefreshToken, SettingsRepository, SyncStateStore, SyncedItem,
+    CredentialStore, DirEntry, DriveAccountInfo, DriveService, FileReader, FileWriter,
+    LocalFileSystem, LocalMetadata, PendingAuthorization, PortError, RefreshToken,
+    SettingsRepository, SyncStateStore, SyncedItem, UploadTarget,
 };
 
 #[derive(Default)]
@@ -181,6 +182,12 @@ impl Authenticator for FakeAuth {
 /// with the `with_*` builders. Only accepts [`FakeAuth::ACCESS_TOKEN`].
 pub struct FakeDrive {
     account: Account,
+    inner: Mutex<DriveState>,
+    pub changes_calls: AtomicUsize,
+}
+
+#[derive(Default)]
+struct DriveState {
     items: BTreeMap<DriveItemId, DriveItem>,
     contents: BTreeMap<DriveItemId, Vec<u8>>,
     /// Folder whose listing fails, to simulate API errors.
@@ -190,7 +197,43 @@ pub struct FakeDrive {
     clock: u64,
     /// Bumped by every change, like Drive's change feed position.
     version: u64,
-    pub changes_calls: AtomicUsize,
+    next_id: u64,
+    trashed: Vec<DriveItemId>,
+    removed_from_my_drive: Vec<DriveItemId>,
+}
+
+impl DriveState {
+    fn tick(&mut self) -> SystemTime {
+        self.clock += 1;
+        self.version += 1;
+        SystemTime::UNIX_EPOCH + Duration::from_secs(self.clock)
+    }
+
+    fn item_mut(&mut self, id: &str) -> &mut DriveItem {
+        self.version += 1;
+        self.items
+            .get_mut(&DriveItemId::new(id))
+            .expect("no such item")
+    }
+
+    fn new_id(&mut self) -> DriveItemId {
+        self.next_id += 1;
+        DriveItemId::new(format!("new-{}", self.next_id))
+    }
+
+    /// Hides an item and everything inside it, as the trash does.
+    fn hide(&mut self, id: &DriveItemId) {
+        let children: Vec<DriveItemId> = self
+            .items
+            .values()
+            .filter(|i| i.parents.contains(id))
+            .map(|i| i.id.clone())
+            .collect();
+        for child in children {
+            self.hide(&child);
+        }
+        self.items.remove(id);
+    }
 }
 
 pub fn md5_hex(content: &[u8]) -> String {
@@ -198,6 +241,13 @@ pub fn md5_hex(content: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+fn file_kind(content: &[u8]) -> ItemKind {
+    ItemKind::File {
+        size: content.len() as u64,
+        md5: Some(md5_hex(content)),
+    }
 }
 
 impl FakeDrive {
@@ -213,34 +263,35 @@ impl FakeDrive {
             kind: ItemKind::Folder,
             modified: SystemTime::UNIX_EPOCH,
             parents: vec![],
+            capabilities: Capabilities::default(),
         };
+        let mut state = DriveState::default();
+        state.items.insert(root.id.clone(), root);
         Self {
             account,
-            items: BTreeMap::from([(root.id.clone(), root)]),
-            contents: BTreeMap::new(),
-            failing: None,
-            corrupt: None,
-            clock: 0,
-            version: 0,
+            inner: Mutex::new(state),
             changes_calls: AtomicUsize::new(0),
         }
     }
 
-    fn tick(&mut self) -> SystemTime {
-        self.clock += 1;
-        self.version += 1;
-        SystemTime::UNIX_EPOCH + Duration::from_secs(self.clock)
+    fn state(&self) -> std::sync::MutexGuard<'_, DriveState> {
+        self.inner.lock().unwrap()
     }
 
-    pub fn with_item(mut self, parent: &str, id: &str, name: &str, kind: ItemKind) -> Self {
-        let item = DriveItem {
-            id: DriveItemId::new(id),
-            name: name.into(),
-            kind,
-            modified: self.tick(),
-            parents: vec![DriveItemId::new(parent)],
-        };
-        self.items.insert(item.id.clone(), item);
+    pub fn with_item(self, parent: &str, id: &str, name: &str, kind: ItemKind) -> Self {
+        {
+            let mut state = self.state();
+            let modified = state.tick();
+            let item = DriveItem {
+                id: DriveItemId::new(id),
+                name: name.into(),
+                kind,
+                modified,
+                parents: vec![DriveItemId::new(parent)],
+                capabilities: Capabilities::default(),
+            };
+            state.items.insert(item.id.clone(), item);
+        }
         self
     }
 
@@ -253,50 +304,84 @@ impl FakeDrive {
     }
 
     pub fn with_content(self, parent: &str, id: &str, name: &str, content: &str) -> Self {
-        let kind = ItemKind::File {
-            size: content.len() as u64,
-            md5: Some(md5_hex(content.as_bytes())),
-        };
-        let mut drive = self.with_item(parent, id, name, kind);
+        let drive = self.with_item(parent, id, name, file_kind(content.as_bytes()));
         drive
+            .state()
             .contents
             .insert(DriveItemId::new(id), content.as_bytes().to_vec());
         drive
     }
 
-    pub fn set_content(&mut self, id: &str, content: &str) {
-        let modified = self.tick();
-        let item = self.items.get_mut(&DriveItemId::new(id)).unwrap();
-        item.kind = ItemKind::File {
-            size: content.len() as u64,
-            md5: Some(md5_hex(content.as_bytes())),
-        };
+    pub fn set_content(&self, id: &str, content: &str) {
+        let mut state = self.state();
+        let modified = state.tick();
+        let item = state.item_mut(id);
+        item.kind = file_kind(content.as_bytes());
         item.modified = modified;
-        self.contents
-            .insert(item.id.clone(), content.as_bytes().to_vec());
+        let id = item.id.clone();
+        state.contents.insert(id, content.as_bytes().to_vec());
     }
 
-    pub fn rename(&mut self, id: &str, name: &str) {
-        self.version += 1;
-        self.items.get_mut(&DriveItemId::new(id)).unwrap().name = name.into();
+    pub fn rename(&self, id: &str, name: &str) {
+        self.state().item_mut(id).name = name.into();
     }
 
-    pub fn move_to(&mut self, id: &str, parent: &str) {
-        self.version += 1;
-        self.items.get_mut(&DriveItemId::new(id)).unwrap().parents = vec![DriveItemId::new(parent)];
+    pub fn move_to(&self, id: &str, parent: &str) {
+        self.state().item_mut(id).parents = vec![DriveItemId::new(parent)];
     }
 
-    pub fn remove(&mut self, id: &str) {
-        self.version += 1;
-        self.items.remove(&DriveItemId::new(id));
+    pub fn remove(&self, id: &str) {
+        let mut state = self.state();
+        state.version += 1;
+        state.hide(&DriveItemId::new(id));
     }
 
-    pub fn fail_listing(&mut self, folder: &str) {
-        self.failing = Some(DriveItemId::new(folder));
+    pub fn set_capabilities(&self, id: &str, capabilities: Capabilities) {
+        self.state().item_mut(id).capabilities = capabilities;
     }
 
-    pub fn corrupt_download(&mut self, id: &str) {
-        self.corrupt = Some(DriveItemId::new(id));
+    pub fn fail_listing(&self, folder: &str) {
+        self.state().failing = Some(DriveItemId::new(folder));
+    }
+
+    pub fn corrupt_download(&self, id: &str) {
+        self.state().corrupt = Some(DriveItemId::new(id));
+    }
+
+    pub fn content(&self, id: &str) -> Option<String> {
+        let state = self.state();
+        let bytes = state.contents.get(&DriveItemId::new(id))?;
+        Some(String::from_utf8(bytes.clone()).unwrap())
+    }
+
+    /// The item named `name` directly inside `parent`, if any.
+    pub fn find(&self, parent: &str, name: &str) -> Option<DriveItem> {
+        let parent = DriveItemId::new(parent);
+        self.state()
+            .items
+            .values()
+            .find(|i| i.parents.contains(&parent) && i.name == name)
+            .cloned()
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.state().items.contains_key(&DriveItemId::new(id))
+    }
+
+    pub fn trashed(&self) -> Vec<String> {
+        self.state()
+            .trashed
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    pub fn removed_from_my_drive(&self) -> Vec<String> {
+        self.state()
+            .removed_from_my_drive
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 
     fn check(token: &AccessToken) -> Result<(), PortError> {
@@ -305,6 +390,14 @@ impl FakeDrive {
         } else {
             Err(PortError::new("invalid access token"))
         }
+    }
+
+    fn get(&self, id: &DriveItemId) -> Result<DriveItem, PortError> {
+        self.state()
+            .items
+            .get(id)
+            .cloned()
+            .ok_or_else(|| PortError::new(format!("no item {id}")))
     }
 }
 
@@ -331,10 +424,11 @@ impl DriveService for FakeDrive {
         folder: &DriveItemId,
     ) -> Result<Vec<DriveItem>, PortError> {
         Self::check(token)?;
-        if self.failing.as_ref() == Some(folder) {
+        let state = self.state();
+        if state.failing.as_ref() == Some(folder) {
             return Err(PortError::new("listing failed"));
         }
-        Ok(self
+        Ok(state
             .items
             .values()
             .filter(|item| item.parents.contains(folder))
@@ -344,10 +438,7 @@ impl DriveService for FakeDrive {
 
     async fn item(&self, token: &AccessToken, id: &DriveItemId) -> Result<DriveItem, PortError> {
         Self::check(token)?;
-        self.items
-            .get(id)
-            .cloned()
-            .ok_or_else(|| PortError::new(format!("no item {id}")))
+        self.get(id)
     }
 
     async fn changes_since(
@@ -357,7 +448,7 @@ impl DriveService for FakeDrive {
     ) -> Result<Changes, PortError> {
         Self::check(token)?;
         self.changes_calls.fetch_add(1, Ordering::Relaxed);
-        let current = self.version.to_string();
+        let current = self.state().version.to_string();
         Ok(Changes {
             any: cursor != Some(current.as_str()),
             cursor: current,
@@ -371,35 +462,185 @@ impl DriveService for FakeDrive {
         out: &mut W,
     ) -> Result<(), PortError> {
         Self::check(token)?;
-        if self.corrupt.as_ref() == Some(id) {
-            return out.write(b"corrupted").await;
-        }
-        let content = self
-            .contents
-            .get(id)
-            .ok_or_else(|| PortError::new("no content"))?;
+        let content = {
+            let state = self.state();
+            if state.corrupt.as_ref() == Some(id) {
+                b"corrupted".to_vec()
+            } else {
+                state
+                    .contents
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| PortError::new("no content"))?
+            }
+        };
         // Several chunks, like a real download.
         for chunk in content.chunks(3) {
             out.write(chunk).await?;
         }
         Ok(())
     }
+
+    async fn create_folder(
+        &self,
+        token: &AccessToken,
+        parent: &DriveItemId,
+        name: &str,
+    ) -> Result<DriveItem, PortError> {
+        Self::check(token)?;
+        let mut state = self.state();
+        let modified = state.tick();
+        let item = DriveItem {
+            id: state.new_id(),
+            name: name.into(),
+            kind: ItemKind::Folder,
+            modified,
+            parents: vec![parent.clone()],
+            capabilities: Capabilities::default(),
+        };
+        state.items.insert(item.id.clone(), item.clone());
+        Ok(item)
+    }
+
+    async fn upload<R: FileReader>(
+        &self,
+        token: &AccessToken,
+        target: UploadTarget<'_>,
+        size: u64,
+        modified: SystemTime,
+        content: &mut R,
+    ) -> Result<DriveItem, PortError> {
+        Self::check(token)?;
+        let mut bytes = Vec::new();
+        let mut buf = [0; 4];
+        loop {
+            let read = content.read(&mut buf).await?;
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buf[..read]);
+        }
+        if bytes.len() as u64 != size {
+            return Err(PortError::new("size mismatch"));
+        }
+        let mut state = self.state();
+        state.version += 1;
+        let item = match target {
+            UploadTarget::New { parent, name } => {
+                let item = DriveItem {
+                    id: state.new_id(),
+                    name: name.into(),
+                    kind: file_kind(&bytes),
+                    modified,
+                    parents: vec![parent.clone()],
+                    capabilities: Capabilities::default(),
+                };
+                state.items.insert(item.id.clone(), item.clone());
+                item
+            }
+            UploadTarget::Existing(id) => {
+                let item = state
+                    .items
+                    .get_mut(id)
+                    .ok_or_else(|| PortError::new("no such file"))?;
+                if !item.capabilities.edit {
+                    return Err(PortError::new("read-only"));
+                }
+                item.kind = file_kind(&bytes);
+                item.modified = modified;
+                item.clone()
+            }
+        };
+        state.contents.insert(item.id.clone(), bytes);
+        Ok(item)
+    }
+
+    async fn move_item(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        from: &DriveItemId,
+        to: &DriveItemId,
+        name: &str,
+    ) -> Result<DriveItem, PortError> {
+        Self::check(token)?;
+        let mut state = self.state();
+        state.version += 1;
+        let item = state
+            .items
+            .get_mut(id)
+            .ok_or_else(|| PortError::new("no such item"))?;
+        if !item.parents.contains(from) {
+            return Err(PortError::new("not in that folder"));
+        }
+        item.parents = vec![to.clone()];
+        item.name = name.into();
+        Ok(item.clone())
+    }
+
+    async fn trash(&self, token: &AccessToken, id: &DriveItemId) -> Result<(), PortError> {
+        Self::check(token)?;
+        let mut state = self.state();
+        if !self.get_unlocked(&state, id)?.capabilities.trash {
+            return Err(PortError::new("not allowed"));
+        }
+        state.version += 1;
+        state.hide(id);
+        state.trashed.push(id.clone());
+        Ok(())
+    }
+
+    async fn remove_from_my_drive(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        parent: &DriveItemId,
+    ) -> Result<(), PortError> {
+        Self::check(token)?;
+        let mut state = self.state();
+        state.version += 1;
+        let item = state
+            .items
+            .get_mut(id)
+            .ok_or_else(|| PortError::new("no such item"))?;
+        item.parents.retain(|p| p != parent);
+        state.removed_from_my_drive.push(id.clone());
+        Ok(())
+    }
+}
+
+impl FakeDrive {
+    fn get_unlocked<'s>(
+        &self,
+        state: &'s DriveState,
+        id: &DriveItemId,
+    ) -> Result<&'s DriveItem, PortError> {
+        state
+            .items
+            .get(id)
+            .ok_or_else(|| PortError::new(format!("no item {id}")))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Node {
-    Dir,
+    Dir {
+        inode: u64,
+    },
     File {
         content: Vec<u8>,
         modified: SystemTime,
+        inode: u64,
     },
 }
 
-/// In-memory filesystem. Paths must be absolute.
+/// In-memory filesystem. Paths must be absolute. Like a real one, renames
+/// keep inodes and every write (save) creates a new one.
 #[derive(Default)]
 pub struct FakeFileSystem {
     nodes: Mutex<BTreeMap<PathBuf, Node>>,
     clock: AtomicU64,
+    inodes: AtomicU64,
 }
 
 pub struct FakeWriter {
@@ -418,20 +659,56 @@ impl FileWriter for FakeWriter {
     }
 }
 
+pub struct FakeReader {
+    content: Vec<u8>,
+    position: usize,
+}
+
+impl FileReader for FakeReader {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, PortError> {
+        let rest = &self.content[self.position..];
+        let n = rest.len().min(buf.len());
+        buf[..n].copy_from_slice(&rest[..n]);
+        self.position += n;
+        Ok(n)
+    }
+}
+
 impl FakeFileSystem {
-    /// Simulates the user writing a file, with a new modification time.
+    fn inode(&self) -> u64 {
+        self.inodes.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Simulates the user saving a file, with a new modification time.
     pub fn write_local(&self, path: &str, content: &str) {
         let modified = SystemTime::UNIX_EPOCH
             + Duration::from_secs(1_000_000 + self.clock.fetch_add(1, Ordering::Relaxed));
         let path = PathBuf::from(path);
         self.create_dir_all(path.parent().unwrap()).unwrap();
+        let inode = self.inode();
         self.nodes.lock().unwrap().insert(
             path,
             Node::File {
                 content: content.as_bytes().to_vec(),
                 modified,
+                inode,
             },
         );
+    }
+
+    /// Simulates the user deleting a file or a whole folder.
+    pub fn delete_local(&self, path: &str) {
+        self.nodes
+            .lock()
+            .unwrap()
+            .retain(|p, _| !p.starts_with(path));
+    }
+
+    /// Simulates the user moving or renaming something.
+    pub fn move_local(&self, from: &str, to: &str) {
+        let to = PathBuf::from(to);
+        self.create_dir_all(to.parent().unwrap()).unwrap();
+        self.rename(Path::new(from), &to).unwrap();
     }
 
     pub fn read(&self, path: &str) -> Option<String> {
@@ -442,7 +719,10 @@ impl FakeFileSystem {
     }
 
     pub fn is_dir(&self, path: &str) -> bool {
-        self.nodes.lock().unwrap().get(Path::new(path)) == Some(&Node::Dir)
+        matches!(
+            self.nodes.lock().unwrap().get(Path::new(path)),
+            Some(Node::Dir { .. })
+        )
     }
 
     /// Every file, relative to `base`.
@@ -460,45 +740,82 @@ impl FakeFileSystem {
 
 fn meta(node: &Node) -> LocalMetadata {
     match node {
-        Node::Dir => LocalMetadata {
+        Node::Dir { inode } => LocalMetadata {
             is_dir: true,
             size: 0,
             modified: SystemTime::UNIX_EPOCH,
+            inode: *inode,
         },
-        Node::File { content, modified } => LocalMetadata {
+        Node::File {
+            content,
+            modified,
+            inode,
+        } => LocalMetadata {
             is_dir: false,
             size: content.len() as u64,
             modified: *modified,
+            inode: *inode,
         },
     }
 }
 
 impl LocalFileSystem for FakeFileSystem {
     type Writer = FakeWriter;
+    type Reader = FakeReader;
 
     fn metadata(&self, path: &Path) -> Result<Option<LocalMetadata>, PortError> {
         Ok(self.nodes.lock().unwrap().get(path).map(meta))
     }
 
+    fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, PortError> {
+        Ok(self
+            .nodes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p.parent() == Some(path))
+            .map(|(p, node)| DirEntry {
+                name: p.file_name().unwrap().to_string_lossy().into_owned(),
+                metadata: meta(node),
+            })
+            .collect())
+    }
+
+    async fn open_read(&self, path: &Path) -> Result<FakeReader, PortError> {
+        match self.nodes.lock().unwrap().get(path) {
+            Some(Node::File { content, .. }) => Ok(FakeReader {
+                content: content.clone(),
+                position: 0,
+            }),
+            _ => Err(PortError::new("not a file")),
+        }
+    }
+
     fn create_dir_all(&self, path: &Path) -> Result<(), PortError> {
-        let mut nodes = self.nodes.lock().unwrap();
-        for dir in path.ancestors() {
-            match nodes.get(dir) {
-                Some(Node::File { .. }) => {
-                    return Err(PortError::new(format!("{} is a file", dir.display())));
-                }
-                Some(Node::Dir) => {}
-                None => {
-                    nodes.insert(dir.to_owned(), Node::Dir);
+        let missing: Vec<PathBuf> = {
+            let nodes = self.nodes.lock().unwrap();
+            let mut missing = Vec::new();
+            for dir in path.ancestors() {
+                match nodes.get(dir) {
+                    Some(Node::File { .. }) => {
+                        return Err(PortError::new(format!("{} is a file", dir.display())));
+                    }
+                    Some(Node::Dir { .. }) => {}
+                    None => missing.push(dir.to_owned()),
                 }
             }
+            missing
+        };
+        for dir in missing {
+            let inode = self.inode();
+            self.nodes.lock().unwrap().insert(dir, Node::Dir { inode });
         }
         Ok(())
     }
 
     async fn begin_write(&self, path: &Path) -> Result<FakeWriter, PortError> {
         match self.nodes.lock().unwrap().get(path.parent().unwrap()) {
-            Some(Node::Dir) => Ok(FakeWriter {
+            Some(Node::Dir { .. }) => Ok(FakeWriter {
                 path: path.to_owned(),
                 content: Vec::new(),
             }),
@@ -514,6 +831,7 @@ impl LocalFileSystem for FakeFileSystem {
         let node = Node::File {
             content: writer.content,
             modified,
+            inode: self.inode(),
         };
         let metadata = meta(&node);
         self.nodes.lock().unwrap().insert(writer.path, node);

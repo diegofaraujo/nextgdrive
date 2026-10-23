@@ -42,6 +42,29 @@ pub struct DriveItem {
     pub kind: ItemKind,
     pub modified: SystemTime,
     pub parents: Vec<DriveItemId>,
+    pub capabilities: Capabilities,
+}
+
+/// What the user may do with an item, as Drive reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Change its content or name.
+    pub edit: bool,
+    /// Move it to the trash: owners in My Drive, managers in shared drives.
+    pub trash: bool,
+    /// Take it out of the user's My Drive without deleting it: what
+    /// "deleting" means for items other people own.
+    pub remove_from_my_drive: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self {
+            edit: true,
+            trash: true,
+            remove_from_my_drive: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

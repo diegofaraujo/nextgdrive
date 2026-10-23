@@ -15,10 +15,39 @@ auth-callback-failure = Sign-in was not completed. Return to Next GDrive and try
 folder-my-drive = My Drive
 folder-shared-drives = Shared drives
 sync-progress = { $done } of { $total } files, { $bytes_done } of { $bytes_total }
+sync-part-downloaded = { $count ->
+    [one] 1 downloaded ({ $bytes })
+   *[other] { $count } downloaded ({ $bytes })
+}
+sync-part-uploaded = { $count ->
+    [one] 1 uploaded ({ $bytes })
+   *[other] { $count } uploaded ({ $bytes })
+}
+sync-part-moved = { $count ->
+    [one] 1 moved
+   *[other] { $count } moved
+}
+sync-part-removed = { $count ->
+    [one] 1 removed from this computer
+   *[other] { $count } removed from this computer
+}
+sync-part-trashed = { $count ->
+    [one] 1 moved to the Drive trash
+   *[other] { $count } moved to the Drive trash
+}
+sync-part-copies = { $count ->
+    [one] 1 conflict copy
+   *[other] { $count } conflict copies
+}
+sync-part-nothing = nothing changed
+sync-conflict-copy = Changed here and in Google Drive; your version was kept as { $path }
+conflict-type-clash = Left as is: a file and a folder have the same name
+conflict-read-only = Your changes stay on this computer: you cannot edit this file in Google Drive
+conflict-cannot-delete = Restored: you cannot delete this item in Google Drive
 sync-started = { $email }: syncing…
-sync-summary = { $email }: { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
+# Inserted in file names, e.g. "report (conflict copy 2026-10-23 14-30).pdf".
+conflict-copy-label = conflict copy { $date }
 sync-conflict = Kept the local version, which changed on this computer: { $path }
-sync-conflict-exists = Kept the existing local file, which is different from Drive and was not created by Next GDrive: { $path }
 sync-skipped-shortcut = Skipped Drive shortcut: { $path }
 sync-skipped-locked = Skipped, the owner does not allow downloading: { $path }
 sync-failed = Failed: { $path }: { $error }
@@ -71,7 +100,7 @@ cli-settings-selection = { $email }: { $count ->
     [one] 1 folder selected
    *[other] { $count } folders selected
 }
-cli-sync-root-changed = Sync folder changed to { $path }. Files already synced were not moved.
+cli-sync-root-changed = Sync folder changed to { $path }. Synced files were moved there.
 cli-folder-selected = Folder selected. It will be downloaded on the next sync.
 cli-folder-deselected = Folder deselected. Local copies were kept and will no longer be updated.
 cli-no-folders = No subfolders.
@@ -91,6 +120,8 @@ cli-status-about = Show what Next GDrive is doing in the background
 cli-status-not-running = Next GDrive is not running in the background. Open the app, or run "nextgdrive daemon".
 cli-sync-requested = Asked the Next GDrive running in the background to sync now.
 cli-daemon-already-running = Next GDrive is already running in the background (the app in the system tray, or another "nextgdrive daemon").
+cli-sync-confirm-deletions = Move files deleted on this computer to the Google Drive trash, even if they are many
+cli-sync-restore-deletions = Download files deleted on this computer again instead of trashing them in Google Drive
 
 ## GUI
 
@@ -122,17 +153,17 @@ gui-folders-count = { $count ->
 gui-folders-description = Everything inside a selected folder is downloaded to this computer.
 gui-folders-inherited = Synced because a folder above it is selected.
 gui-no-subfolders = No Subfolders
-gui-sync-title = Download
 gui-sync-now = Sync Now
 gui-sync-never = Not synced yet in this session
 gui-syncing = Syncing…
-gui-sync-result = { $downloaded } downloaded ({ $bytes }), { $moved } moved, { $removed } removed
 gui-report-conflicts = { $count ->
-    [one] 1 local file was not replaced
-   *[other] { $count } local files were not replaced
+    [one] 1 item needs attention
+   *[other] { $count } items need attention
 }
-gui-conflict-changed = Changed on this computer
-gui-conflict-exists = A different file was already here
+gui-report-copies = { $count ->
+    [one] 1 file changed on both sides, kept as a conflict copy
+   *[other] { $count } files changed on both sides, kept as conflict copies
+}
 gui-report-failures = { $count ->
     [one] 1 item failed
    *[other] { $count } items failed
@@ -146,7 +177,7 @@ gui-skipped-locked = The owner does not allow downloading
 gui-open-folder = Open Folder
 gui-sync-root = Sync Folder
 gui-sync-root-change = Change…
-gui-sync-root-note = Each account gets its own folder inside it. Files already synced stay where they are; the next sync downloads into the new folder.
+gui-sync-root-note = Each account gets its own folder inside it. Changing it moves the synced files.
 gui-deselect-title = Stop Syncing “{ $name }”?
 gui-deselect-body = Downloaded files can be removed from this computer, where they stay available in Google Drive, or kept as regular files that are no longer updated. Files you changed on this computer are always kept.
 gui-deselect-keep = Keep Files
@@ -169,6 +200,11 @@ tray-sync-now = Sync Now
 tray-pause = Pause Syncing
 tray-resume = Resume Syncing
 tray-quit = Quit
+gui-deletions-title = { $count } Files Deleted on This Computer
+gui-deletions-body = Move them to the Google Drive trash too, where they can be restored for 30 days? Or download them again?
+gui-deletions-restore = Restore Files
+gui-deletions-trash = Move to Trash
+gui-sync-title = Sync
 
 ## Errors
 
@@ -186,3 +222,6 @@ error-invalid-sync-root = The sync folder must be an absolute path: { $path }
 error-not-a-folder = Not a folder: { $id }
 error-sync-in-progress = This account is already being synced, by this or another Next GDrive process.
 error-dbus = Could not use the session bus (D-Bus): { $details }
+error-local-folder-missing = The synced folder { $path } is missing (an unmounted disk?). Nothing was changed in Google Drive; sync resumes when the folder is back.
+error-mass-deletion = { $count } files were deleted on this computer. Confirm before they go to the Google Drive trash, or restore them.
+error-folder-exists = A folder already exists at { $path }. Choose another location, or move or remove that folder first.

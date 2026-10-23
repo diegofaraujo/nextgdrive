@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub use fluent_templates::fluent_bundle::FluentValue;
 use fluent_templates::{LanguageIdentifier, Loader, langid};
 use nextgdrive_application::AppError;
+use nextgdrive_application::use_cases::{Conflict, ConflictReason, SyncReport};
 use nextgdrive_domain::{DomainError, StorageQuota};
 
 fluent_templates::static_loader! {
@@ -87,6 +88,18 @@ impl Localizer {
                 [("email", email.to_string().into())],
             ),
             AppError::SyncInProgress(_) => self.tr("error-sync-in-progress"),
+            AppError::FolderExists(path) => self.tr_args(
+                "error-folder-exists",
+                [("path", path.display().to_string().into())],
+            ),
+            AppError::LocalFolderMissing(path) => self.tr_args(
+                "error-local-folder-missing",
+                [("path", path.display().to_string().into())],
+            ),
+            AppError::MassDeletion { count } => self.tr_args(
+                "error-mass-deletion",
+                [("count", FluentValue::from(*count))],
+            ),
             AppError::MissingCredentials(email) => self.tr_args(
                 "error-missing-credentials",
                 [("email", email.to_string().into())],
@@ -137,6 +150,67 @@ impl Localizer {
             ),
             _ => self.tr_args("quota-used-unlimited", [used]),
         }
+    }
+
+    /// What a sync did, e.g. "3 downloaded (1.2 MB), 1 uploaded (40 KB)".
+    pub fn sync_summary(&self, report: &SyncReport) -> String {
+        let count = |id: &str, n: usize| self.tr_args(id, [("count", FluentValue::from(n))]);
+        let sized = |id: &str, n: usize, bytes: u64| {
+            self.tr_args(
+                id,
+                [
+                    ("count", FluentValue::from(n)),
+                    ("bytes", self.bytes(bytes).into()),
+                ],
+            )
+        };
+        let mut parts = Vec::new();
+        if report.downloaded > 0 {
+            parts.push(sized(
+                "sync-part-downloaded",
+                report.downloaded,
+                report.downloaded_bytes,
+            ));
+        }
+        if report.uploaded > 0 {
+            parts.push(sized(
+                "sync-part-uploaded",
+                report.uploaded,
+                report.uploaded_bytes,
+            ));
+        }
+        for (id, n) in [
+            ("sync-part-moved", report.moved + report.moved_in_drive),
+            ("sync-part-removed", report.removed),
+            ("sync-part-trashed", report.trashed),
+            ("sync-part-copies", report.conflict_copies.len()),
+        ] {
+            if n > 0 {
+                parts.push(count(id, n));
+            }
+        }
+        if parts.is_empty() {
+            return self.tr("sync-part-nothing");
+        }
+        parts.join(", ")
+    }
+
+    /// Short explanation of why an item was left alone.
+    pub fn conflict_reason(&self, reason: ConflictReason) -> String {
+        self.tr(match reason {
+            ConflictReason::TypeClash => "conflict-type-clash",
+            ConflictReason::ReadOnly => "conflict-read-only",
+            ConflictReason::CannotDelete => "conflict-cannot-delete",
+        })
+    }
+
+    /// One line about an item left alone, for logs and the command line.
+    pub fn conflict_line(&self, conflict: &Conflict) -> String {
+        format!(
+            "{}: {}",
+            self.conflict_reason(conflict.reason),
+            conflict.path.display()
+        )
     }
 
     /// User-facing message for a domain error.
