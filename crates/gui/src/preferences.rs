@@ -39,10 +39,34 @@ pub fn present(ctx: &Rc<Ctx>) {
             ctx_for_autostart.toast(&e.to_string());
         }
     });
+    let notifications_row = adw::SwitchRow::builder()
+        .title(i18n.tr("gui-notifications"))
+        .subtitle(i18n.tr("gui-notifications-subtitle"))
+        .active(
+            ctx.services
+                .local
+                .get_settings()
+                .execute()
+                .is_ok_and(|s| s.notifications),
+        )
+        .build();
+    let ctx_for_notifications = ctx.clone();
+    notifications_row.connect_active_notify(move |row| {
+        let ctx = &ctx_for_notifications;
+        if let Err(e) = ctx
+            .services
+            .local
+            .set_notifications()
+            .execute(row.is_active())
+        {
+            ctx.toast(&ctx.i18n.app_error(&e));
+        }
+    });
     let background = adw::PreferencesGroup::builder()
         .title(i18n.tr("gui-background-group"))
         .build();
     background.add(&autostart_row);
+    background.add(&notifications_row);
 
     let page = adw::PreferencesPage::new();
     page.add(&group);

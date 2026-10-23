@@ -14,6 +14,8 @@ struct Entry {
     id: DriveItemId,
     name: String,
     selected: bool,
+    /// A shared drive, listed in its own group.
+    shared: bool,
 }
 
 /// Chooses which folders of an account to sync, one level at a time: the
@@ -25,6 +27,8 @@ struct FoldersPage {
     inherited: bool,
     stack: gtk::Stack,
     group: adw::PreferencesGroup,
+    /// Shared drives, on the first level only; hidden while empty.
+    shared_group: adw::PreferencesGroup,
     status: adw::StatusPage,
 }
 
@@ -42,8 +46,14 @@ pub fn build(
     } else if inherited {
         group.set_description(Some(&i18n.tr("gui-folders-inherited")));
     }
+    let shared_group = adw::PreferencesGroup::builder()
+        .title(i18n.tr("gui-shared-drives"))
+        .description(i18n.tr("gui-shared-drives-description"))
+        .visible(false)
+        .build();
     let list = adw::PreferencesPage::new();
     list.add(&group);
+    list.add(&shared_group);
     let loading = adw::StatusPage::builder()
         .child(
             &gtk::Spinner::builder()
@@ -71,6 +81,7 @@ pub fn build(
         inherited,
         stack,
         group,
+        shared_group,
         status,
     });
     page.load(parent.map(|(id, _)| id));
@@ -93,6 +104,7 @@ impl FoldersPage {
                         Ok(drives
                             .into_iter()
                             .map(|e| Entry {
+                                shared: matches!(e.item.kind, DriveKind::Shared { .. }),
                                 name: match e.item.kind {
                                     DriveKind::MyDrive => settings.my_drive_folder.clone(),
                                     DriveKind::Shared { name } => name,
@@ -110,6 +122,7 @@ impl FoldersPage {
                             id: e.item.id,
                             name: e.item.name,
                             selected: e.selected,
+                            shared: false,
                         })
                         .collect()),
                 }
@@ -137,7 +150,13 @@ impl FoldersPage {
             }
             Ok(entries) => {
                 for entry in entries {
-                    self.group.add(&self.row(entry));
+                    let group = if entry.shared {
+                        self.shared_group.set_visible(true);
+                        &self.shared_group
+                    } else {
+                        &self.group
+                    };
+                    group.add(&self.row(entry));
                 }
                 self.stack.set_visible_child_name("list");
             }

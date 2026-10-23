@@ -64,6 +64,18 @@ status-syncing = Syncing { $email }: { $done } of { $total } files
 status-paused = Sync paused
 status-problem = Problem with { $email }: { $message }
 
+notify-conflict-title = { $count ->
+    [one] A file changed in two places
+   *[other] { $count } files changed in two places
+}
+notify-attention-title = { $count ->
+    [one] 1 item needs attention
+   *[other] { $count } items need attention
+}
+notify-problem-title = Could not sync { $email }
+notify-and-more = { $list } and { $count } more
+notify-open = Open
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -205,6 +217,10 @@ gui-deletions-body = Move them to the Google Drive trash too, where they can be 
 gui-deletions-restore = Restore Files
 gui-deletions-trash = Move to Trash
 gui-sync-title = Sync
+gui-shared-drives = Shared Drives
+gui-shared-drives-description = Drives shared with you by your team or organization.
+gui-notifications = Notifications
+gui-notifications-subtitle = Tell me about conflicts and sync problems
 
 ## Errors
 

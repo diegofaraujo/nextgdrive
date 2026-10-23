@@ -19,6 +19,23 @@ impl<'a, S: SettingsRepository> GetSettings<'a, S> {
     }
 }
 
+/// Turns desktop notifications on or off.
+pub struct SetNotifications<'a, S> {
+    settings: &'a S,
+}
+
+impl<'a, S: SettingsRepository> SetNotifications<'a, S> {
+    pub fn new(settings: &'a S) -> Self {
+        Self { settings }
+    }
+
+    pub fn execute(&self, enabled: bool) -> Result<(), AppError> {
+        let mut settings = self.settings.load().map_err(AppError::Storage)?;
+        settings.notifications = enabled;
+        self.settings.save(&settings).map_err(AppError::Storage)
+    }
+}
+
 /// Changes the folder that holds the synced accounts, moving each account's
 /// folder there. If a move fails, the setting is left unchanged.
 pub struct SetSyncRoot<'a, S, R, F, T> {

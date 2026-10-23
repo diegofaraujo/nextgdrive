@@ -14,7 +14,7 @@ pub use change_selection::{ChangeSelection, DeselectReport, LocalCopies};
 pub use get_account_status::GetAccountStatus;
 pub use list_accounts::ListAccounts;
 pub use remove_account::RemoveAccount;
-pub use settings::{GetSettings, SetSyncRoot};
+pub use settings::{GetSettings, SetNotifications, SetSyncRoot};
 pub use sync::{
     Conflict, ConflictReason, Deletions, MASS_DELETION_MIN, SkipReason, SyncAccount, SyncOptions,
     SyncProgress, SyncReport,

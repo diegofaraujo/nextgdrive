@@ -20,6 +20,7 @@ struct SettingsFile {
     my_drive_folder: Option<String>,
     shared_drives_folder: Option<String>,
     poll_interval_secs: Option<u64>,
+    notifications: Option<bool>,
     /// Keyed by account id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     accounts: BTreeMap<String, AccountSettings>,
@@ -72,6 +73,7 @@ impl SettingsRepository for TomlSettingsRepository {
                 .poll_interval_secs
                 .filter(|secs| *secs > 0)
                 .unwrap_or(defaults.poll_interval_secs),
+            notifications: file.notifications.unwrap_or(defaults.notifications),
             selections: file
                 .accounts
                 .into_iter()
@@ -96,6 +98,7 @@ impl SettingsRepository for TomlSettingsRepository {
             my_drive_folder: Some(settings.my_drive_folder.clone()),
             shared_drives_folder: Some(settings.shared_drives_folder.clone()),
             poll_interval_secs: Some(settings.poll_interval_secs),
+            notifications: Some(settings.notifications),
             accounts: settings
                 .selections
                 .iter()
@@ -120,6 +123,7 @@ mod tests {
             my_drive_folder: "Meu Drive".into(),
             shared_drives_folder: "Drives compartilhados".into(),
             poll_interval_secs: 60,
+            notifications: true,
             selections: BTreeMap::new(),
         }
     }
