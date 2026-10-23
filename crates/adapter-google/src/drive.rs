@@ -98,6 +98,8 @@ impl GoogleDrive {
                 .http
                 .put(session)
                 .header(header::CONTENT_RANGE, range)
+                // Not implied for an empty body, and Drive requires it.
+                .header(header::CONTENT_LENGTH, read)
                 .body(buf[..read].to_vec())
                 .send()
                 .await

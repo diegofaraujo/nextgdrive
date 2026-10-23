@@ -1,5 +1,9 @@
 //! The local side of the sync on a regular Linux filesystem.
 
+mod staging;
+
+pub use staging::DiskStaging;
+
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::MetadataExt;

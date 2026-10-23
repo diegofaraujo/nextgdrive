@@ -82,6 +82,11 @@ trash-restored = “{ $name }” restored to { $location }.
 trash-restored-unknown = “{ $name }” restored.
 trash-location-unknown = a folder you can no longer access
 
+stream-pending = { $count ->
+    [one] 1 file written earlier was not in Google Drive yet; uploading it.
+   *[other] { $count } files written earlier were not in Google Drive yet; uploading them.
+}
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -146,7 +151,7 @@ cli-trash-restore-about = Put an item back where it was
 cli-trash-item-id = Item id, as shown by "trash list"
 cli-trash-empty = The trash is empty.
 cli-trash-entry = { $name }  (in { $location })  [{ $id }]
-cli-stream-about = Show an account's whole Google Drive in a folder, downloading files only when they are opened (read-only for now)
+cli-stream-about = Show an account's whole Google Drive in a folder, downloading files only when they are opened
 cli-stream-mountpoint = Folder to show it in (created if missing; must be empty)
 cli-stream-mounted = Google Drive is available in { $path }. Press Ctrl+C to stop.
 cli-stream-unmounted = Google Drive folder closed.

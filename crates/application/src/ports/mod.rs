@@ -6,6 +6,7 @@ mod drive;
 mod error;
 mod local_fs;
 mod settings;
+mod staging;
 mod sync_state;
 
 pub use account_repository::AccountRepository;
@@ -18,4 +19,5 @@ pub use drive::{Changes, DriveAccountInfo, DriveService, UploadTarget};
 pub use error::PortError;
 pub use local_fs::{DirEntry, FileReader, FileWriter, LocalFileSystem, LocalMetadata};
 pub use settings::SettingsRepository;
+pub use staging::{StagedFile, StagedTarget, StagingArea};
 pub use sync_state::{SyncStateStore, SyncedItem, SyncedKind};

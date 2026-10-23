@@ -2,7 +2,13 @@
 //! contents are fetched only when read, in blocks kept in a cache.
 //!
 //! This is the logic behind the virtual filesystem; the FUSE adapter only
-//! translates kernel requests into these calls. Read-only for now.
+//! translates kernel requests into these calls. Writes (see `write.rs`) go
+//! to a staging area first and are uploaded when the file is closed.
+
+mod write;
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -13,9 +19,11 @@ use nextgdrive_domain::{Account, DriveItem, DriveItemId, DriveKind, ItemKind};
 
 use crate::ports::{
     Authenticator, BlockCache, BlockKey, CredentialStore, DriveService, PortError,
-    SettingsRepository,
+    SettingsRepository, StagedFile, StagedTarget, StagingArea,
 };
 use crate::{AppError, TokenProvider};
+
+pub use write::UploadOutcome;
 
 /// Identifies a node for the lifetime of a mount (the FUSE inode number).
 pub type NodeId = u64;
@@ -43,6 +51,25 @@ pub struct Entry {
     pub attr: NodeAttr,
 }
 
+/// Why a filesystem request failed; the FUSE adapter turns it into an errno.
+#[derive(Debug)]
+pub enum StreamError {
+    NotFound,
+    /// The item exists but the user may not do that (e.g. editing a Google
+    /// Doc's shortcut, deleting someone else's file in a shared drive).
+    NotPermitted,
+    NotEmpty,
+    IsDir,
+    NotDir,
+    Failed(AppError),
+}
+
+impl From<AppError> for StreamError {
+    fn from(error: AppError) -> Self {
+        Self::Failed(error)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct StreamConfig {
     /// How long a folder listing is trusted before asking Drive again.
@@ -52,6 +79,12 @@ pub struct StreamConfig {
     /// While a file is read sequentially, a missing block is fetched together
     /// with the next ones, up to this many, in a single request.
     pub readahead_blocks: u64,
+    /// New files are uploaded once unchanged for this long, not on every
+    /// close: programs often close a file more than once while creating it,
+    /// and save through a temporary file they rename over the original.
+    pub new_file_quiet: Duration,
+    /// After a failed upload (e.g. offline), wait this long before retrying.
+    pub retry_backoff: Duration,
 }
 
 impl Default for StreamConfig {
@@ -60,6 +93,8 @@ impl Default for StreamConfig {
             listing_ttl: Duration::from_secs(30),
             block_size: 1 << 20,
             readahead_blocks: 8,
+            new_file_quiet: Duration::from_secs(2),
+            retry_backoff: Duration::from_secs(60),
         }
     }
 }
@@ -76,13 +111,39 @@ enum Content {
         version: String,
     },
     /// A Google Doc, shown as its generated `.html` shortcut.
-    Shortcut(Vec<u8>),
+    Shortcut {
+        id: DriveItemId,
+        bytes: Vec<u8>,
+    },
+    /// Content held in the staging area (being edited, or not uploaded yet).
+    Staged(String),
 }
 
 #[derive(Debug, Clone)]
 struct Node {
     content: Content,
     modified: SystemTime,
+}
+
+/// A staged file, as this mount knows it.
+#[derive(Debug, Clone)]
+struct Staging {
+    file: StagedFile,
+    len: u64,
+    /// Bumped by every write; the content is uploaded when it differs from
+    /// `uploaded`, so writes during an upload are not lost.
+    generation: u64,
+    uploaded: u64,
+    /// Last write, for `new_file_quiet`.
+    changed: Instant,
+    /// Set after a failed upload, for `retry_backoff`.
+    retry_after: Option<Instant>,
+}
+
+impl Staging {
+    fn dirty(&self) -> bool {
+        self.generation != self.uploaded
+    }
 }
 
 #[derive(Default)]
@@ -95,7 +156,61 @@ struct Table {
     listings: HashMap<NodeId, (Instant, Vec<(String, NodeId)>)>,
     /// Where the last read of each file ended, to recognize sequential reads.
     read_ends: HashMap<NodeId, u64>,
+    staged: HashMap<String, Staging>,
+    /// Drive files being edited → their staging key.
+    staged_by_drive: HashMap<DriveItemId, String>,
     next: NodeId,
+}
+
+impl Table {
+    fn attr(&self, id: NodeId) -> Option<NodeAttr> {
+        let node = self.nodes.get(&id)?;
+        let (kind, size, modified) = match &node.content {
+            Content::Root | Content::SharedDrives | Content::Folder(_) => {
+                (NodeKind::Dir, 0, node.modified)
+            }
+            Content::File { size, .. } => (NodeKind::File, *size, node.modified),
+            Content::Shortcut { bytes, .. } => (NodeKind::File, bytes.len() as u64, node.modified),
+            Content::Staged(key) => {
+                let staging = self.staged.get(key)?;
+                (NodeKind::File, staging.len, staging.file.modified)
+            }
+        };
+        Some(NodeAttr {
+            id,
+            kind,
+            size,
+            modified,
+        })
+    }
+
+    fn content(&self, id: NodeId) -> Option<Content> {
+        self.nodes.get(&id).map(|n| n.content.clone())
+    }
+
+    /// The node for `key` under `dir`, created if new.
+    fn node_for(&mut self, dir: NodeId, key: String) -> NodeId {
+        if let Some(id) = self.by_key.get(&(dir, key.clone())) {
+            return *id;
+        }
+        let id = self.next;
+        self.next += 1;
+        self.by_key.insert((dir, key), id);
+        id
+    }
+
+    /// Where the node of a staged file is, if it was listed.
+    fn node_of_staged(&self, key: &str) -> Option<NodeId> {
+        self.nodes
+            .iter()
+            .find(|(_, node)| matches!(&node.content, Content::Staged(k) if k == key))
+            .map(|(id, _)| *id)
+    }
+
+    /// Forgets a folder listing, so the next request asks Drive again.
+    fn invalidate(&mut self, dir: NodeId) {
+        self.listings.remove(&dir);
+    }
 }
 
 /// What a mount remembers between requests. Shared by all of them.
@@ -133,48 +248,56 @@ impl StreamState {
 }
 
 /// One request against a mounted account.
-pub struct StreamingDrive<'a, A, C, D, K, S> {
+pub struct StreamingDrive<'a, A, C, D, K, S, G> {
     tokens: &'a TokenProvider<A, C>,
     drive: &'a D,
     cache: &'a K,
     settings: &'a S,
+    staging: &'a G,
     state: &'a StreamState,
     account: &'a Account,
+    /// Inserted in the names of conflict copies.
+    conflict_label: String,
 }
 
-impl<'a, A, C, D, K, S> StreamingDrive<'a, A, C, D, K, S>
+impl<'a, A, C, D, K, S, G> StreamingDrive<'a, A, C, D, K, S, G>
 where
     A: Authenticator,
     C: CredentialStore,
     D: DriveService,
     K: BlockCache,
     S: SettingsRepository,
+    G: StagingArea,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tokens: &'a TokenProvider<A, C>,
         drive: &'a D,
         cache: &'a K,
         settings: &'a S,
+        staging: &'a G,
         state: &'a StreamState,
         account: &'a Account,
+        conflict_label: String,
     ) -> Self {
         Self {
             tokens,
             drive,
             cache,
             settings,
+            staging,
             state,
             account,
+            conflict_label,
         }
     }
 
     /// `None` for ids this mount never handed out.
     pub fn attr(&self, id: NodeId) -> Option<NodeAttr> {
-        let table = self.state.table();
-        table.nodes.get(&id).map(|node| attr_of(id, node))
+        self.state.table().attr(id)
     }
 
-    pub async fn list(&self, dir: NodeId) -> Result<Vec<Entry>, AppError> {
+    pub async fn list(&self, dir: NodeId) -> Result<Vec<Entry>, StreamError> {
         let fresh = {
             let table = self.state.table();
             table
@@ -191,43 +314,40 @@ where
         Ok(children
             .into_iter()
             .filter_map(|(name, id)| {
-                let node = table.nodes.get(&id)?;
                 Some(Entry {
                     name,
-                    attr: attr_of(id, node),
+                    attr: table.attr(id)?,
                 })
             })
             .collect())
     }
 
-    pub async fn lookup(&self, dir: NodeId, name: &str) -> Result<Option<Entry>, AppError> {
+    pub async fn lookup(&self, dir: NodeId, name: &str) -> Result<Option<Entry>, StreamError> {
         Ok(self.list(dir).await?.into_iter().find(|e| e.name == name))
     }
 
     /// Up to `size` bytes from `offset`, fetching only the blocks not cached yet.
-    pub async fn read(&self, node: NodeId, offset: u64, size: u32) -> Result<Vec<u8>, AppError> {
-        let content = {
-            let table = self.state.table();
-            table.nodes.get(&node).map(|n| n.content.clone())
-        };
+    pub async fn read(&self, node: NodeId, offset: u64, size: u32) -> Result<Vec<u8>, StreamError> {
+        let content = self.state.table().content(node);
         match content {
-            Some(Content::Shortcut(bytes)) => {
+            Some(Content::Shortcut { bytes, .. }) => {
                 let start = usize::try_from(offset)
                     .unwrap_or(usize::MAX)
                     .min(bytes.len());
                 let end = start.saturating_add(size as usize).min(bytes.len());
                 Ok(bytes[start..end].to_vec())
             }
+            Some(Content::Staged(key)) => Ok(self
+                .staging
+                .read_at(&key, offset, size as usize)
+                .map_err(AppError::Storage)?),
             Some(Content::File {
                 id,
                 size: file_size,
                 version,
             }) => {
-                let end = offset.saturating_add(u64::from(size)).min(file_size);
-                if offset >= end {
-                    return Ok(Vec::new());
-                }
                 let config = self.state.config;
+                let end = offset.saturating_add(u64::from(size)).min(file_size);
                 let sequential = {
                     let mut table = self.state.table();
                     let previous = table.read_ends.insert(node, end);
@@ -238,20 +358,39 @@ where
                 } else {
                     1
                 };
-                let block_size = config.block_size;
-                let mut out = Vec::with_capacity(usize::try_from(end - offset).unwrap_or(0));
-                for index in offset / block_size..=(end - 1) / block_size {
-                    let block = self.block(&id, &version, index, file_size, ahead).await?;
-                    let block_start = index * block_size;
-                    let from = usize::try_from(offset.max(block_start) - block_start).unwrap_or(0);
-                    let to = usize::try_from(end.min(block_start + block_size) - block_start)
-                        .unwrap_or(0);
-                    out.extend_from_slice(&block[from.min(block.len())..to.min(block.len())]);
-                }
-                Ok(out)
+                Ok(self
+                    .read_range(&id, &version, file_size, offset, end, ahead)
+                    .await?)
             }
-            _ => Err(AppError::Drive(PortError::new("not a file"))),
+            Some(_) => Err(StreamError::IsDir),
+            None => Err(StreamError::NotFound),
         }
+    }
+
+    /// Bytes `offset..end` of a Drive file, block by block.
+    async fn read_range(
+        &self,
+        id: &DriveItemId,
+        version: &str,
+        file_size: u64,
+        offset: u64,
+        end: u64,
+        ahead: u64,
+    ) -> Result<Vec<u8>, AppError> {
+        let end = end.min(file_size);
+        if offset >= end {
+            return Ok(Vec::new());
+        }
+        let block_size = self.state.config.block_size;
+        let mut out = Vec::with_capacity(usize::try_from(end - offset).unwrap_or(0));
+        for index in offset / block_size..=(end - 1) / block_size {
+            let block = self.block(id, version, index, file_size, ahead).await?;
+            let block_start = index * block_size;
+            let from = usize::try_from(offset.max(block_start) - block_start).unwrap_or(0);
+            let to = usize::try_from(end.min(block_start + block_size) - block_start).unwrap_or(0);
+            out.extend_from_slice(&block[from.min(block.len())..to.min(block.len())]);
+        }
+        Ok(out)
     }
 
     /// Block `index`, from the cache or else from Drive together with the
@@ -304,16 +443,18 @@ where
         Ok(first.unwrap_or_default())
     }
 
-    async fn fetch_listing(&self, dir: NodeId) -> Result<Vec<(String, NodeId)>, AppError> {
-        let content = {
-            let table = self.state.table();
-            table.nodes.get(&dir).map(|n| n.content.clone())
-        };
+    async fn fetch_listing(&self, dir: NodeId) -> Result<Vec<(String, NodeId)>, StreamError> {
+        let content = self
+            .state
+            .table()
+            .content(dir)
+            .ok_or(StreamError::NotFound)?;
         let token = self.tokens.access_token(self.account).await?;
         // (key, display name, content, modified)
         let mut children: Vec<(String, String, Content, SystemTime)> = Vec::new();
+        let mut folder_id = None;
         match content {
-            Some(Content::Root) => {
+            Content::Root => {
                 let settings = self.settings.load().map_err(AppError::Storage)?;
                 let drives = self.drive.drives(&token).await.map_err(AppError::Drive)?;
                 for drive in &drives {
@@ -338,7 +479,7 @@ where
                     ));
                 }
             }
-            Some(Content::SharedDrives) => {
+            Content::SharedDrives => {
                 let drives = self.drive.drives(&token).await.map_err(AppError::Drive)?;
                 let shared: Vec<(DriveItemId, String)> = drives
                     .into_iter()
@@ -361,7 +502,7 @@ where
                     ));
                 }
             }
-            Some(Content::Folder(folder)) => {
+            Content::Folder(folder) => {
                 let items = self
                     .drive
                     .children(&token, &folder)
@@ -382,24 +523,45 @@ where
                         item.modified,
                     ));
                 }
+                folder_id = Some(folder);
             }
-            _ => return Err(AppError::Drive(PortError::new("not a folder"))),
+            _ => return Err(StreamError::NotDir),
         }
 
         let mut table = self.state.table();
         let mut listing = Vec::with_capacity(children.len());
-        for (key, name, content, modified) in children {
-            let id = match table.by_key.get(&(dir, key.clone())) {
-                Some(id) => *id,
-                None => {
-                    let id = table.next;
-                    table.next += 1;
-                    table.by_key.insert((dir, key), id);
-                    id
-                }
-            };
+        for (key, name, mut content, modified) in children {
+            let id = table.node_for(dir, key);
+            // A file being edited shows its staged content, not Drive's.
+            if let Content::File { id: drive_id, .. } = &content
+                && let Some(staged) = table.staged_by_drive.get(drive_id)
+            {
+                content = Content::Staged(staged.clone());
+            }
             table.nodes.insert(id, Node { content, modified });
             listing.push((name, id));
+        }
+        // New files not uploaded yet (or never: editors' temporary files).
+        if let Some(folder) = folder_id {
+            let pending: Vec<(String, String)> = table
+                .staged
+                .values()
+                .filter(
+                    |s| matches!(&s.file.target, StagedTarget::New { parent } if *parent == folder),
+                )
+                .map(|s| (s.file.key.clone(), s.file.name.clone()))
+                .collect();
+            for (key, name) in pending {
+                let id = table.node_for(dir, format!("staged:{key}"));
+                table.nodes.insert(
+                    id,
+                    Node {
+                        content: Content::Staged(key),
+                        modified: self.state.mounted_at,
+                    },
+                );
+                listing.push((name, id));
+            }
         }
         table
             .listings
@@ -408,240 +570,34 @@ where
     }
 }
 
+/// Drive's version of a file's content: its MD5, or else its modification time.
+fn version_of(item: &DriveItem) -> String {
+    match &item.kind {
+        ItemKind::File { md5: Some(md5), .. } => md5.clone(),
+        _ => {
+            let nanos = item
+                .modified
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            format!("t{nanos}")
+        }
+    }
+}
+
 /// How a Drive item appears in the tree; `None` for items not shown.
 fn content_of(item: &DriveItem) -> Option<Content> {
     match &item.kind {
         ItemKind::Folder => Some(Content::Folder(item.id.clone())),
-        ItemKind::File { size, md5 } => Some(Content::File {
+        ItemKind::File { size, .. } => Some(Content::File {
             id: item.id.clone(),
             size: *size,
-            // Without an MD5, the modification time stands for the version.
-            version: md5.clone().unwrap_or_else(|| {
-                let nanos = item
-                    .modified
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                format!("t{nanos}")
-            }),
+            version: version_of(item),
         }),
-        ItemKind::GoogleDoc { url } => Some(Content::Shortcut(
-            google_doc_shortcut(&item.name, url).into_bytes(),
-        )),
+        ItemKind::GoogleDoc { url } => Some(Content::Shortcut {
+            id: item.id.clone(),
+            bytes: google_doc_shortcut(&item.name, url).into_bytes(),
+        }),
         ItemKind::Shortcut | ItemKind::NotDownloadable => None,
-    }
-}
-
-fn attr_of(id: NodeId, node: &Node) -> NodeAttr {
-    let (kind, size) = match &node.content {
-        Content::Root | Content::SharedDrives | Content::Folder(_) => (NodeKind::Dir, 0),
-        Content::File { size, .. } => (NodeKind::File, *size),
-        Content::Shortcut(bytes) => (NodeKind::File, bytes.len() as u64),
-    };
-    NodeAttr {
-        id,
-        kind,
-        size,
-        modified: node.modified,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::Ordering;
-
-    use super::*;
-    use crate::use_cases::fakes::{
-        FakeAuth, FakeDrive, InMemoryBlocks, InMemoryCredentials, InMemorySettings, account,
-    };
-
-    struct World {
-        account: Account,
-        tokens: TokenProvider<FakeAuth, InMemoryCredentials>,
-        drive: FakeDrive,
-        cache: InMemoryBlocks,
-        settings: InMemorySettings,
-        state: StreamState,
-    }
-
-    fn world(listing_ttl: Duration) -> World {
-        let account = account("1", "ana@x.com");
-        World {
-            tokens: TokenProvider::new(
-                FakeAuth::default(),
-                InMemoryCredentials::with_token("1", FakeAuth::REFRESH_TOKEN),
-            ),
-            drive: FakeDrive::new(account.clone())
-                .with_folder("root", "docs", "Docs")
-                .with_content("docs", "a", "a.txt", "0123456789abcdefghij")
-                .with_item(
-                    "docs",
-                    "sheet",
-                    "Budget",
-                    ItemKind::GoogleDoc {
-                        url: "https://docs.google.com/spreadsheets/d/sheet".into(),
-                    },
-                )
-                .with_item("docs", "link", "link", ItemKind::Shortcut),
-            account,
-            cache: InMemoryBlocks::default(),
-            settings: InMemorySettings::default(),
-            // Tiny blocks, so reads span several.
-            state: StreamState::new(StreamConfig {
-                listing_ttl,
-                block_size: 8,
-                readahead_blocks: 2,
-            }),
-        }
-    }
-
-    impl World {
-        fn fs(
-            &self,
-        ) -> StreamingDrive<
-            '_,
-            FakeAuth,
-            InMemoryCredentials,
-            FakeDrive,
-            InMemoryBlocks,
-            InMemorySettings,
-        > {
-            StreamingDrive::new(
-                &self.tokens,
-                &self.drive,
-                &self.cache,
-                &self.settings,
-                &self.state,
-                &self.account,
-            )
-        }
-
-        async fn path(&self, path: &[&str]) -> Entry {
-            let mut dir = ROOT;
-            let mut entry = None;
-            for name in path {
-                let found = self
-                    .fs()
-                    .lookup(dir, name)
-                    .await
-                    .unwrap()
-                    .unwrap_or_else(|| panic!("{name}"));
-                dir = found.attr.id;
-                entry = Some(found);
-            }
-            entry.expect("non-empty path")
-        }
-    }
-
-    fn names(entries: &[Entry]) -> Vec<&str> {
-        entries.iter().map(|e| e.name.as_str()).collect()
-    }
-
-    #[tokio::test]
-    async fn shows_the_drive_without_downloading_anything() {
-        let w = world(Duration::from_secs(60));
-
-        assert_eq!(names(&w.fs().list(ROOT).await.unwrap()), ["My Drive"]);
-        let docs = w.path(&["My Drive", "Docs"]).await;
-        let entries = w.fs().list(docs.attr.id).await.unwrap();
-
-        assert_eq!(names(&entries), ["a.txt", "Budget.html"]);
-        assert_eq!(entries[0].attr.size, 20);
-        assert_eq!(w.drive.range_calls.load(Ordering::Relaxed), 0);
-    }
-
-    #[tokio::test]
-    async fn reads_fetch_only_the_blocks_needed_and_only_once() {
-        let w = world(Duration::from_secs(60));
-        let a = w.path(&["My Drive", "Docs", "a.txt"]).await;
-
-        // Bytes 6..10 span blocks 0 and 1.
-        assert_eq!(w.fs().read(a.attr.id, 6, 4).await.unwrap(), b"6789");
-        assert_eq!(w.drive.range_calls.load(Ordering::Relaxed), 2);
-
-        assert_eq!(
-            w.fs().read(a.attr.id, 0, 100).await.unwrap(),
-            b"0123456789abcdefghij"
-        );
-        // Only the last block was new.
-        assert_eq!(w.drive.range_calls.load(Ordering::Relaxed), 3);
-        assert_eq!(w.fs().read(a.attr.id, 20, 5).await.unwrap(), b"");
-    }
-
-    #[tokio::test]
-    async fn sequential_reads_fetch_ahead_in_one_request() {
-        let w = world(Duration::from_secs(60));
-        let a = w.path(&["My Drive", "Docs", "a.txt"]).await;
-        let calls = || w.drive.range_calls.load(Ordering::Relaxed);
-
-        // The first read is not known to be sequential: one block.
-        assert_eq!(w.fs().read(a.attr.id, 0, 4).await.unwrap(), b"0123");
-        assert_eq!(calls(), 1);
-        // Continuing where it ended: blocks 1 and 2 come in one request.
-        assert_eq!(w.fs().read(a.attr.id, 4, 8).await.unwrap(), b"456789ab");
-        assert_eq!(calls(), 2);
-        assert_eq!(w.fs().read(a.attr.id, 12, 8).await.unwrap(), b"cdefghij");
-        assert_eq!(calls(), 2, "already fetched ahead");
-    }
-
-    #[tokio::test]
-    async fn new_versions_never_get_stale_blocks() {
-        let w = world(Duration::ZERO);
-        let a = w.path(&["My Drive", "Docs", "a.txt"]).await;
-        w.fs().read(a.attr.id, 0, 4).await.unwrap();
-
-        w.drive.set_content("a", "NEW CONTENT");
-        let again = w.path(&["My Drive", "Docs", "a.txt"]).await;
-
-        assert_eq!(again.attr.id, a.attr.id, "same file keeps its node");
-        assert_eq!(again.attr.size, 11);
-        assert_eq!(w.fs().read(a.attr.id, 0, 4).await.unwrap(), b"NEW ");
-    }
-
-    #[tokio::test]
-    async fn google_docs_read_as_their_shortcut() {
-        let w = world(Duration::from_secs(60));
-        let doc = w.path(&["My Drive", "Docs", "Budget.html"]).await;
-
-        let page = w.fs().read(doc.attr.id, 0, 10_000).await.unwrap();
-
-        assert_eq!(page.len() as u64, doc.attr.size);
-        assert!(
-            String::from_utf8(page)
-                .unwrap()
-                .contains("docs.google.com/spreadsheets/d/sheet")
-        );
-    }
-
-    #[tokio::test]
-    async fn renamed_items_keep_their_node() {
-        let w = world(Duration::ZERO);
-        let a = w.path(&["My Drive", "Docs", "a.txt"]).await;
-
-        w.drive.rename("a", "renamed.txt");
-        let docs = w.path(&["My Drive", "Docs"]).await;
-
-        assert!(
-            w.fs()
-                .lookup(docs.attr.id, "a.txt")
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(
-            w.path(&["My Drive", "Docs", "renamed.txt"]).await.attr.id,
-            a.attr.id
-        );
-    }
-
-    #[tokio::test]
-    async fn listings_are_reused_until_they_expire() {
-        let w = world(Duration::from_secs(60));
-        let docs = w.path(&["My Drive", "Docs"]).await;
-        w.fs().list(docs.attr.id).await.unwrap();
-
-        w.drive.rename("a", "renamed.txt");
-
-        assert_eq!(names(&w.fs().list(docs.attr.id).await.unwrap())[0], "a.txt");
     }
 }

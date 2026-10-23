@@ -673,3 +673,23 @@ async fn a_few_deletions_need_no_confirmation() {
 
     assert_eq!(report.trashed, MASS_DELETION_MIN);
 }
+
+#[tokio::test]
+async fn a_file_replaced_in_drive_by_another_of_the_same_name_arrives_in_one_sync() {
+    let mut w = world();
+    w.sync().await;
+    // What `sed -i` and many editors do: the old file goes, a new one takes its name.
+    w.drive.remove("a");
+    w.drive = std::mem::replace(&mut w.drive, FakeDrive::new(w.account.clone())).with_content(
+        "docs",
+        "a2",
+        "a.txt",
+        "replacement",
+    );
+
+    let report = w.sync().await;
+
+    assert_eq!(w.file("Docs/a.txt").as_deref(), Some("replacement"));
+    assert!(report.conflicts.is_empty(), "{:?}", report.conflicts);
+    assert!(report.conflict_copies.is_empty());
+}

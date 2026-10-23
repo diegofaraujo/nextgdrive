@@ -32,13 +32,13 @@ Clean Architecture + Hexagonal (Ports & Adapters) in a Cargo workspace with one 
 | `domain` | Entities and rules (`Account`, `Email`, `StorageQuota`, `DriveItem`, `Settings`) and `local_name` (Drive name → valid, unique Linux file name; Google Doc shortcut format). Pure, no I/O. | nothing internal |
 | `application` | Use cases (`use_cases/`), the ports they need (`ports/`), and `TokenProvider` (cached access tokens). | `domain` |
 | `adapter-config` | `AccountRepository` and `SettingsRepository` as TOML under XDG config (`~/.config/nextgdrive/{accounts,settings}.toml`). | `domain`, `application` |
-| `adapter-localfs` | `LocalFileSystem`: downloads go to `.<name>.nextgdrive-part`, fsync, then rename into place. | `domain`, `application` |
+| `adapter-localfs` | `LocalFileSystem` (downloads go to `.<name>.nextgdrive-part`, fsync, then rename into place), the inotify watcher, and `DiskStaging` (`StagingArea` for streamed writes under `~/.local/share/nextgdrive/staging/<account id>/`, `<key>.data` + `<key>.json`). | `domain`, `application` |
 | `adapter-sqlite` | `SyncStateStore` in `~/.local/share/nextgdrive/state.sqlite3` (rusqlite, bundled SQLite). | `domain`, `application` |
 | `adapter-google` | `Authenticator` (OAuth 2.0 for installed apps: PKCE + loopback server on `127.0.0.1:<random port>`) and `DriveService` (Drive API v3). | `domain`, `application` |
 | `adapter-keyring` | `CredentialStore` in the Secret Service keyring via `oo7`. Only refresh tokens are stored, never on disk. | `domain`, `application` |
 | `i18n` | Fluent translations shared by GUI and CLI; maps `AppError`/`DomainError` to messages; formats sizes and quotas. | `domain`, `application` |
 | `adapter-cache` | `BlockCache` on disk under XDG cache (`~/.cache/nextgdrive/blocks/<file id>/<version>/<index>`); evicts least recently used blocks past its limit. | `domain`, `application` |
-| `adapter-fuse` | FUSE filesystem (`fuser`, pure Rust: needs only `fusermount3`, not libfuse) for streaming; defines the `StreamBackend` it calls, answers each request in a Tokio task. Read-only for now. | `domain`, `application` |
+| `adapter-fuse` | FUSE filesystem (`fuser`, pure Rust: needs only `fusermount3`, not libfuse) for streaming; defines the `StreamBackend` it calls, answers each request in a Tokio task (writes are answered inline, keeping their order). | `domain`, `application` |
 | `adapter-dbus` | Session-bus service `io.github.diegofaraujo.NextGDrive.Sync` (zbus) exposed by whichever process runs background sync, and the `Client` the CLI uses. Owning the bus name means "I run background sync". | — |
 | `composition` | Shared composition root: builds the concrete adapters (`Services`), localizes setup errors, and `host::SyncHost` (background-sync loop with status, sync-now/pause/resume, served on D-Bus). | everything except front-ends |
 | `cli` | Binary `nextgdrive` (clap). | `composition`, inner layers |
@@ -89,6 +89,10 @@ Two such environments syncing the same folder act as two computers, which is how
 Trash (`use_cases/trash.rs`): `DriveTrash` lists only *explicitly* trashed items (a trashed folder is one entry; restoring it brings back its content) and restores them in place. Drive reports `trashedTime` only for shared-drive items, so `TrashEntry::trashed_at` is optional and My Drive items keep Drive's `recency` order.
 
 Streaming (`application/src/streaming.rs`): an account's whole Drive as a virtual tree, content fetched only when read. `StreamState` (one per mount) keeps a node table with ids stable across relistings (keyed by parent + Drive id), folder listings cached for `listing_ttl`, and where each file's last read ended; `StreamingDrive` answers attr/list/lookup/read. Content is fetched in `block_size` blocks keyed by Drive's MD5 (so a new version never gets stale blocks); a sequential read fetches up to `readahead_blocks` in one ranged request, a random one (thumbnailers) just one block. Try it with `nextgdrive stream <email> <folder>` (foreground, Ctrl+C unmounts).
+
+Streaming writes (`streaming/write.rs`) follow sync's rules: content goes to the `StagingArea` and stays there until it is in Drive (failed uploads back off `retry_backoff`, then retry; `recover()` picks staged files up after a restart). Edits of existing files upload on close (`flush`); **new files upload only once unchanged for `new_file_quiet`**, because programs close files more than once while creating them and save through temporary files renamed over the original (`sed -i`, gedit) — renaming a never-uploaded file over an existing one uploads it as a new version of that file, keeping its id, history and sharing. If the file changed in Drive since editing began, the edit becomes a conflict copy. Deleting trashes (or removes from My Drive). Ignored names are never uploaded.
+
+Locking rule for `StreamState::table()` (a `std::sync::Mutex`): never call it in an `if let`/`match` condition whose body locks again. Temporaries in those conditions live until the end of the block, so the second lock deadlocks (this happened). Take the value into a `let` first.
 
 ### Google OAuth client
 
