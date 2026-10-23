@@ -8,17 +8,23 @@ use nextgdrive_adapter_dbus::{
     HostControl, HostStatus, STATE_IDLE, STATE_PAUSED, STATE_SYNCING, ServeError,
 };
 use nextgdrive_application::AppError;
-use nextgdrive_application::background::SyncEvent;
+use std::collections::HashSet;
+
+use nextgdrive_application::background::{SyncEvent, TickOptions};
+use nextgdrive_application::ports::AccountRepository;
+use nextgdrive_domain::{AccountId, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
 use tokio::sync::{mpsc, watch};
 
 use crate::Services;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Command {
     SyncNow,
     Pause,
     Resume,
+    /// Trash the many local deletions of this account (by email).
+    ConfirmDeletions(String),
 }
 
 /// Translated line describing something background sync did, for logs.
@@ -52,6 +58,12 @@ impl HostControl for Control {
 
     fn resume(&self) {
         let _ = self.commands.send(Command::Resume);
+    }
+
+    fn confirm_deletions(&self, email: &str) {
+        let _ = self
+            .commands
+            .send(Command::ConfirmDeletions(email.to_owned()));
     }
 }
 
@@ -105,6 +117,10 @@ impl SyncHost {
     pub fn resume(&self) {
         self.control.resume();
     }
+
+    pub fn confirm_deletions(&self, email: &str) {
+        self.control.confirm_deletions(email);
+    }
 }
 
 impl Drop for SyncHost {
@@ -133,18 +149,51 @@ async fn run(
     let background = services.background_sync();
     let mut paused = false;
     let mut force = false;
+    let mut confirmed: HashSet<AccountId> = HashSet::new();
+    // Local changes, reported by the file watcher.
+    let (local_tx, mut local_rx) = mpsc::unbounded_channel::<()>();
+    let mut watched: Option<(
+        std::path::PathBuf,
+        nextgdrive_adapter_localfs::ChangeWatcher,
+    )> = None;
+    let mut local_changes = false;
+    // Confirming applies to the next sync only.
+    let account_id = |email: &str| -> Option<AccountId> {
+        let email = Email::parse(email).ok()?;
+        Some(services.local.accounts.find_by_email(&email).ok()??.id)
+    };
     loop {
+        // Watch the sync folder, again whenever it changes (or appears).
+        if let Ok(settings) = services.local.get_settings().execute()
+            && watched.as_ref().map(|(root, _)| root) != Some(&settings.sync_root)
+        {
+            let tx = local_tx.clone();
+            watched = nextgdrive_adapter_localfs::watch(&settings.sync_root, move || {
+                let _ = tx.send(());
+            })
+            .ok()
+            .map(|watcher| (settings.sync_root, watcher));
+        }
         if !paused {
             let errors = Mutex::new(Vec::new());
             let finished = {
                 let on_event =
                     |event: SyncEvent<'_>| on_event(&i18n, &log, &status, &errors, event);
-                let tick = background.tick(std::mem::take(&mut force), &on_event);
+                let options = TickOptions {
+                    force: std::mem::take(&mut force),
+                    conflict_label: crate::conflict_label(&i18n),
+                    confirmed_deletions: std::mem::take(&mut confirmed),
+                    local_changes: std::mem::take(&mut local_changes),
+                };
+                let tick = background.tick(&options, &on_event);
                 tokio::pin!(tick);
                 // Commands arriving mid-sync: pausing cancels it, the rest wait.
                 loop {
                     tokio::select! {
                         result = &mut tick => break Some(result),
+                        // Includes our own downloads: one extra, quiet check
+                        // afterwards, so edits made during a sync are not missed.
+                        Some(()) = local_rx.recv() => local_changes = true,
                         command = commands.recv() => match command {
                             None => return,
                             Some(Command::Pause) => {
@@ -152,6 +201,7 @@ async fn run(
                                 break None;
                             }
                             Some(Command::SyncNow) => force = true,
+                            Some(Command::ConfirmDeletions(email)) => confirmed.extend(account_id(&email)),
                             Some(Command::Resume) => {}
                         },
                     }
@@ -178,11 +228,16 @@ async fn run(
             .map(|s| s.poll_interval_secs)
             .unwrap_or(nextgdrive_domain::Settings::DEFAULT_POLL_INTERVAL_SECS);
         // A forced sync requested during the last one runs right away.
-        if force && !paused {
+        if (force || local_changes) && !paused {
+            settle(&mut local_rx).await;
             continue;
         }
         tokio::select! {
             () = tokio::time::sleep(Duration::from_secs(interval)), if !paused => {}
+            Some(()) = local_rx.recv() => {
+                settle(&mut local_rx).await;
+                local_changes = true;
+            }
             command = commands.recv() => match command {
                 None => return,
                 Some(Command::SyncNow) => {
@@ -200,9 +255,20 @@ async fn run(
                     paused = false;
                     force = true;
                 }
+                Some(Command::ConfirmDeletions(email)) => {
+                    confirmed.extend(account_id(&email));
+                    paused = false;
+                }
             },
         }
     }
+}
+
+/// Waits until local changes stop for a moment, so that saving a file (often
+/// several writes and renames) or copying a folder causes a single sync.
+async fn settle(events: &mut mpsc::UnboundedReceiver<()>) {
+    const QUIET: Duration = Duration::from_secs(2);
+    while let Ok(Some(())) = tokio::time::timeout(QUIET, events.recv()).await {}
 }
 
 fn on_event(
@@ -235,16 +301,18 @@ fn on_event(
             s.bytes_done = p.bytes_done;
             s.bytes_total = p.bytes_total;
         }),
-        SyncEvent::Finished(account, Ok(report)) => log(i18n.tr_args(
-            "sync-summary",
-            [
-                ("email", account.email.to_string().into()),
-                ("downloaded", FluentValue::from(report.downloaded)),
-                ("bytes", i18n.bytes(report.downloaded_bytes).into()),
-                ("moved", FluentValue::from(report.moved)),
-                ("removed", FluentValue::from(report.removed)),
-            ],
-        )),
+        SyncEvent::Finished(account, Ok(report)) => {
+            log(format!("{}: {}", account.email, i18n.sync_summary(report)));
+            for copy in &report.conflict_copies {
+                log(i18n.tr_args(
+                    "sync-conflict-copy",
+                    [("path", copy.display().to_string().into())],
+                ));
+            }
+            for conflict in &report.conflicts {
+                log(i18n.conflict_line(conflict));
+            }
+        }
         // Someone else (e.g. a one-off `nextgdrive sync run`) is on it.
         SyncEvent::Finished(_, Err(AppError::SyncInProgress(_))) => {}
         SyncEvent::Finished(account, Err(e)) | SyncEvent::CheckFailed(account, e) => {

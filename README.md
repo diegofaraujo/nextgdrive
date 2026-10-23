@@ -2,7 +2,7 @@
 
 An open-source Google Drive sync client for Linux, written in Rust.
 
-> **Status:** early development. You can link Google accounts and see their storage usage; file sync is not implemented yet.
+> **Status:** early development, not yet ready for important data. Two-way sync of selected folders works; test it on a non-critical account first.
 
 ## Goals
 
@@ -41,6 +41,16 @@ nextgdrive account status    # storage usage of each linked account
 nextgdrive account list
 nextgdrive account remove <email>
 ```
+
+```bash
+nextgdrive sync folders <email>          # browse drives and folders
+nextgdrive sync select <email> <id>      # sync a folder (and everything in it)
+nextgdrive sync run                      # sync now
+nextgdrive status                        # what the background sync is doing
+nextgdrive daemon                        # background sync without the graphical app
+```
+
+The graphical app (`nextgdrive-gui`) lives in the system tray and keeps the selected folders in sync in both directions. Files deleted on the computer go to the Google Drive trash (nothing is ever deleted permanently); when a file changes on both sides, both versions are kept.
 
 Refresh tokens are stored in the system keyring (Secret Service, such as GNOME Keyring), never in plain files.
 

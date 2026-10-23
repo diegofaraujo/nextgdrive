@@ -11,7 +11,7 @@ mod quota;
 mod settings;
 
 pub use account::{Account, AccountId, Email};
-pub use drive::{Drive, DriveItem, DriveItemId, DriveKind, ItemKind};
+pub use drive::{Capabilities, Drive, DriveItem, DriveItemId, DriveKind, ItemKind};
 pub use error::DomainError;
 pub use quota::StorageQuota;
 pub use settings::Settings;

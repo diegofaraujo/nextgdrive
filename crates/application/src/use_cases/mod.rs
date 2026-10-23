@@ -6,7 +6,7 @@ mod list_accounts;
 mod local_copies;
 mod remove_account;
 mod settings;
-mod sync_account;
+mod sync;
 
 pub use add_account::AddAccount;
 pub use browse_drive::{BrowseDrive, BrowseEntry};
@@ -15,8 +15,9 @@ pub use get_account_status::GetAccountStatus;
 pub use list_accounts::ListAccounts;
 pub use remove_account::RemoveAccount;
 pub use settings::{GetSettings, SetSyncRoot};
-pub use sync_account::{
-    Conflict, ConflictReason, SkipReason, SyncAccount, SyncProgress, SyncReport,
+pub use sync::{
+    Conflict, ConflictReason, Deletions, MASS_DELETION_MIN, SkipReason, SyncAccount, SyncOptions,
+    SyncProgress, SyncReport,
 };
 
 #[cfg(test)]

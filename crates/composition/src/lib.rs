@@ -38,15 +38,22 @@ const DEFAULT_SYNC_DIR: &str = "GoogleDrive";
 pub struct LocalServices {
     pub accounts: TomlAccountRepository,
     pub settings: TomlSettingsRepository,
+    pub fs: Filesystem,
+    pub state: SqliteSyncState,
 }
 
 impl LocalServices {
     pub fn new(i18n: &Localizer) -> Result<Self, String> {
         let no_config_dir = || i18n.tr("error-no-config-dir");
+        let data = nextgdrive_adapter_config::data_dir().ok_or_else(no_config_dir)?;
+        let state = SqliteSyncState::open(&data.join(STATE_FILE))
+            .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))?;
         Ok(Self {
             accounts: TomlAccountRepository::in_config_dir().ok_or_else(no_config_dir)?,
             settings: TomlSettingsRepository::in_config_dir(default_settings(i18n)?)
                 .ok_or_else(no_config_dir)?,
+            fs: Filesystem,
+            state,
         })
     }
 
@@ -58,8 +65,11 @@ impl LocalServices {
         GetSettings::new(&self.settings)
     }
 
-    pub fn set_sync_root(&self) -> SetSyncRoot<'_, TomlSettingsRepository> {
-        SetSyncRoot::new(&self.settings)
+    pub fn set_sync_root(
+        &self,
+    ) -> SetSyncRoot<'_, TomlSettingsRepository, TomlAccountRepository, Filesystem, SqliteSyncState>
+    {
+        SetSyncRoot::new(&self.settings, &self.accounts, &self.fs, &self.state)
     }
 }
 
@@ -68,8 +78,6 @@ pub struct Services {
     pub local: LocalServices,
     pub tokens: Tokens,
     pub drive: GoogleDrive,
-    pub fs: Filesystem,
-    pub state: SqliteSyncState,
 }
 
 impl Services {
@@ -86,10 +94,6 @@ impl Services {
         let credentials = KeyringCredentialStore::new()
             .await
             .map_err(|e| i18n.tr_args("error-credentials", [("details", e.to_string().into())]))?;
-        let data =
-            nextgdrive_adapter_config::data_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
-        let state = SqliteSyncState::open(&data.join(STATE_FILE))
-            .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))?;
         let http = http_client();
         Ok(Self {
             local,
@@ -98,8 +102,6 @@ impl Services {
                 credentials,
             ),
             drive: GoogleDrive::new(http),
-            fs: Filesystem,
-            state,
         })
     }
 
@@ -167,8 +169,8 @@ impl Services {
             &self.tokens,
             &self.drive,
             &self.local.settings,
-            &self.fs,
-            &self.state,
+            &self.local.fs,
+            &self.local.state,
         )
     }
 }
@@ -189,9 +191,9 @@ impl Services {
         SyncAccount::new(
             &self.tokens,
             &self.drive,
-            &self.fs,
+            &self.local.fs,
             &self.local.settings,
-            &self.state,
+            &self.local.state,
         )
     }
 }
@@ -213,12 +215,19 @@ impl Services {
         BackgroundSync::new(
             &self.tokens,
             &self.drive,
-            &self.fs,
+            &self.local.fs,
             &self.local.settings,
-            &self.state,
+            &self.local.state,
             &self.local.accounts,
         )
     }
+}
+
+/// Label for conflict copies, with the local date and time:
+/// `report (conflicted copy 2026-10-23 14-30).pdf`.
+pub fn conflict_label(i18n: &Localizer) -> String {
+    let now = jiff::Zoned::now().strftime("%Y-%m-%d %H-%M").to_string();
+    i18n.tr_args("conflict-copy-label", [("date", now.into())])
 }
 
 /// `~/GoogleDrive`, with folder names in the current language.

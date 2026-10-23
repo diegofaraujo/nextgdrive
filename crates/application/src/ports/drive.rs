@@ -2,7 +2,9 @@ use std::future::Future;
 
 use nextgdrive_domain::{Account, Drive, DriveItem, DriveItemId, StorageQuota};
 
-use super::{AccessToken, FileWriter, PortError};
+use std::time::SystemTime;
+
+use super::{AccessToken, FileReader, FileWriter, PortError};
 
 /// Account details as reported by Google Drive.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +20,17 @@ pub struct Changes {
     pub any: bool,
     /// Where to continue reading next time.
     pub cursor: String,
+}
+
+/// Where uploaded content goes.
+#[derive(Debug, Clone, Copy)]
+pub enum UploadTarget<'a> {
+    New {
+        parent: &'a DriveItemId,
+        name: &'a str,
+    },
+    /// New content for an existing file (kept as a new version in Drive).
+    Existing(&'a DriveItemId),
 }
 
 /// Google Drive API.
@@ -60,5 +73,49 @@ pub trait DriveService: Sync {
         token: &AccessToken,
         id: &DriveItemId,
         out: &mut W,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+
+    fn create_folder(
+        &self,
+        token: &AccessToken,
+        parent: &DriveItemId,
+        name: &str,
+    ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
+
+    /// Uploads `size` bytes from `content`; Drive records `modified` as the
+    /// file's modification time.
+    fn upload<R: FileReader>(
+        &self,
+        token: &AccessToken,
+        target: UploadTarget<'_>,
+        size: u64,
+        modified: SystemTime,
+        content: &mut R,
+    ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
+
+    /// Moves an item from one folder to another and/or renames it.
+    fn move_item(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        from: &DriveItemId,
+        to: &DriveItemId,
+        name: &str,
+    ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
+
+    /// Moves an item to the trash, from which it can be restored for 30 days.
+    /// Next GDrive never deletes anything permanently.
+    fn trash(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+
+    /// Takes an item someone else owns out of the user's My Drive.
+    fn remove_from_my_drive(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        parent: &DriveItemId,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
 }

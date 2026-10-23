@@ -40,6 +40,46 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Local files never uploaded: temporary and lock files of common editors and
+/// file managers, and Next GDrive's own partial downloads.
+pub fn is_ignored(name: &str) -> bool {
+    const PREFIXES: [&str; 3] = [".~lock.", "~$", ".goutputstream-"];
+    const SUFFIXES: [&str; 5] = [".swp", ".swo", ".swx", "~", PARTIAL_SUFFIX];
+    const NAMES: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
+    PREFIXES.iter().any(|p| name.starts_with(p))
+        || SUFFIXES.iter().any(|s| name.ends_with(s))
+        || NAMES.contains(&name)
+}
+
+/// Suffix of files being downloaded (see the local filesystem adapter).
+pub const PARTIAL_SUFFIX: &str = ".nextgdrive-part";
+
+/// Name of the copy that keeps local changes when a file also changed in
+/// Drive: `report (conflicted copy 2026-10-23 14-30).pdf`.
+pub fn conflict_copy_name(name: &str, label: &str) -> String {
+    let (stem, ext) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name, ""),
+    };
+    let suffix = format!(" ({label})");
+    let stem = truncate(
+        stem,
+        MAX_NAME_BYTES.saturating_sub(suffix.len() + ext.len()),
+    );
+    format!("{stem}{suffix}{ext}")
+}
+
+/// Drive name for a local file name: Google Doc shortcuts drop their extension.
+pub fn drive_name(local: &str, kind: &ItemKind) -> String {
+    match kind {
+        ItemKind::GoogleDoc { .. } => local
+            .strip_suffix(&format!(".{GOOGLE_DOC_EXTENSION}"))
+            .unwrap_or(local)
+            .to_owned(),
+        _ => local.to_owned(),
+    }
+}
+
 /// Valid local file name for an item, before resolving clashes between siblings.
 pub fn local_name(name: &str, kind: &ItemKind) -> String {
     let mut local: String = name
@@ -158,6 +198,43 @@ mod tests {
         assert!(!page.contains("<script>"));
         assert!(!page.contains("javascript:"));
         assert!(page.contains("url=about:blank"));
+    }
+
+    #[test]
+    fn ignores_temporary_files() {
+        for name in [
+            ".~lock.report.odt#",
+            "~$report.docx",
+            ".goutputstream-AB12",
+            "notes.txt.swp",
+            "a.txt~",
+            ".a.txt.nextgdrive-part",
+            ".DS_Store",
+        ] {
+            assert!(is_ignored(name), "{name}");
+        }
+        for name in ["report.odt", "lock.txt", ".bashrc", "~notes"] {
+            assert!(!is_ignored(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn conflict_copies_keep_the_extension() {
+        assert_eq!(
+            conflict_copy_name("report.pdf", "conflicted copy 2026-10-23 14-30"),
+            "report (conflicted copy 2026-10-23 14-30).pdf"
+        );
+        assert_eq!(conflict_copy_name("README", "copy"), "README (copy)");
+    }
+
+    #[test]
+    fn shortcut_names_map_back_to_document_names() {
+        let doc = ItemKind::GoogleDoc { url: String::new() };
+        assert_eq!(drive_name("Budget 2025.html", &doc), "Budget 2025");
+        assert_eq!(
+            drive_name("page.html", &ItemKind::File { size: 0, md5: None }),
+            "page.html"
+        );
     }
 
     #[test]

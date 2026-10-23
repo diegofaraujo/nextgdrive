@@ -53,29 +53,36 @@ Patterns to follow:
 - GUI ownership (see `gui/src/ctx.rs`): each page's state is an `Rc` kept alive by its root `NavigationPage` via `keep_alive`; the state may hold the root's children but never the root, and closures stored in widgets the state owns hold only `Weak`. Breaking this either frees the page while visible (dead buttons) or leaks it.
 - GUI and CLI contain no business logic; they call use cases and render results.
 
-### Sync engine (`application/src/use_cases/sync_account.rs`)
+### Sync engine (`application/src/use_cases/sync/`)
 
-Download-only for now (upload is the next phase). Invariants that tests in that file enforce; keep them when changing it:
+Two-way. `sync/plan.rs` is a pure function from (Drive tree, local scan, recorded base) to operations; `sync/apply.rs` runs them; `sync/remote.rs` lists Drive, `sync/local.rs` scans the disk. Invariants that `sync/tests.rs` enforces (each was mutation-checked); keep them when changing the engine:
 
-- A local file whose size or mtime differs from what was recorded at its last sync is **never overwritten or deleted**; it is reported in `SyncReport::conflicts`. Untracked local files are only adopted if their MD5 matches Drive.
-- The full remote tree of every selected folder is listed **before** any local change, so an API failure aborts instead of looking like mass deletion.
-- Each `SyncedItem` remembers the selected folder it was synced under. Deselecting (`ChangeSelection::deselect`) always makes the user choose `LocalCopies::Keep` (stop tracking, files stay) or `LocalCopies::Remove` (delete unchanged copies now); the CLI requires `--keep-local`/`--remove-local` and the GUI asks in a dialog. An item that disappears while its folder is still selected was removed on Drive, and its unchanged local copy is deleted. Both paths use `use_cases/local_copies.rs`, the single place that decides whether a local copy may be removed.
-- Downloads are verified against Drive's MD5 before replacing anything. Local mtimes are set to Drive's `modifiedTime`.
-- Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`. The two folder names are translated once and pinned in `settings.toml`.
-- Google Docs/Sheets/etc. become small `.html` pages that redirect to the document (`.desktop` links do not open from COSMIC Files or recent Nautilus). Shortcuts are rewritten, never moved, when their name or format changes. Drive shortcuts and non-downloadable files are skipped and reported.
+- Nothing is deleted permanently in Drive. Local deletions **trash** items; items others own are only removed from My Drive (`Capabilities::remove_from_my_drive`); items the user may not delete are restored locally and reported (`ConflictReason::CannotDelete`). Deleting a Google Doc's `.html` shortcut trashes the document, as the official client does with `.gdoc`.
+- A change is never lost. Changed on both sides → Drive's version keeps the name, the local one becomes `name (<conflict label>).ext` and is uploaded next to it. Deleted locally but changed in Drive → Drive wins (downloaded again). Edited locally but deleted in Drive → uploaded as new. A folder deleted locally is trashed as one item only if everything in it is gone and nothing in it changed or was added in Drive.
+- The full remote tree is listed and the local tree scanned **before** any change, so an API failure aborts instead of looking like mass deletion.
+- Guards: if a selected folder that was synced before is missing locally (unmounted disk), sync stops with `AppError::LocalFolderMissing`; if more than `MASS_DELETION_MIN` files and over half of the tracked ones were deleted locally, it stops with `AppError::MassDeletion` unless `SyncOptions::deletions` is `Trash` (confirmed) or `Restore`.
+- Local moves/renames are recognized by inode (`LocalMetadata::inode`, unchanged size+mtime) and become moves in Drive, keeping history and sharing. Folder moves on either side are resolved first and rewrite every path below them.
+- Ignored names (`local_name::is_ignored`: editor lock/swap files, partial downloads, …) are never uploaded; only content inside selected folders is.
+- Downloads are verified against Drive's MD5 before replacing anything; local mtimes are set to Drive's `modifiedTime`, and uploads send the local mtime as `modifiedTime`.
+- Each `SyncedItem` remembers the selected folder it was synced under. Deselecting (`ChangeSelection::deselect`) makes the user choose `LocalCopies::Keep` or `LocalCopies::Remove` (CLI `--keep-local`/`--remove-local`, GUI dialog); `use_cases/local_copies.rs` is the single place that decides whether a local copy may be removed.
+- `SetSyncRoot` moves the folders of accounts synced from this state to the new root, and never touches folders it did not sync.
+- Local layout: `<sync root>/<email>/<My Drive folder>/…` and `<sync root>/<email>/<Shared drives folder>/<drive>/…`; the two folder names are translated once and pinned in `settings.toml`. Google Docs become `.html` redirect pages (`.desktop` links do not open from COSMIC Files or recent Nautilus).
 
 Process model: exactly one process per session runs background sync, by hosting `SyncHost` and owning the D-Bus name. Normally that is the GUI: it starts `SyncHost`, shows the tray icon, hides the window on close (`--background` starts hidden; the XDG autostart entry toggled in Preferences uses it), and only **Quit** in the tray stops syncing. On headless machines `nextgdrive daemon` hosts it instead. `nextgdrive status` and `nextgdrive sync run` (without an email) talk to the host over D-Bus when one runs, and otherwise work standalone.
 
-Background sync (`application/src/background.rs`): `BackgroundSync::tick` reads Drive's change feed per account and runs `SyncAccount` when something changed remotely, the selection changed, or `FULL_SYNC_INTERVAL` (15 min) passed (the feed cannot report local deletions). The feed cursor is saved only after a successful sync. `SyncAccount` and `ChangeSelection::deselect` hold a per-account lock (`SyncStateStore::try_lock`; a `flock`ed file next to the SQLite DB), so the tray app, `nextgdrive daemon` and one-off CLI runs never sync the same account at once.
+Background sync (`application/src/background.rs`): `BackgroundSync::tick` reads Drive's change feed per account and runs `SyncAccount` when something changed remotely, the file watcher (inotify, `adapter-localfs::watch`) saw local changes, the selection changed, or `FULL_SYNC_INTERVAL` (15 min) passed (a safety net for changes made while the app was not running). The feed cursor is saved only after a successful sync. `SyncAccount` and `ChangeSelection::deselect` hold a per-account lock (`SyncStateStore::try_lock`; a `flock`ed file next to the SQLite DB), so the tray app, `nextgdrive daemon` and one-off CLI runs never sync the same account at once.
 
-To exercise the engine against a real account without touching the real setup, isolate everything except the keyring:
+To exercise the engine against a real account without touching the real setup, isolate everything except the keyring, and write the sync root into the isolated `settings.toml` **before the first command**. Do not use `config sync-root` for this: it moves the account folders of accounts synced from that state, and the default root (`~/GoogleDrive`) is shared with the real setup since `HOME` is. Keep test writes inside a dedicated Drive folder (e.g. `Work/NextGDrive-Testes` on the test account), and trash it at the end.
 
 ```bash
 T=$(mktemp -d); mkdir -p $T/config/nextgdrive
 cp ~/.config/nextgdrive/{accounts.toml,oauth-client.json} $T/config/nextgdrive/
+printf 'sync_root = "%s/GoogleDrive"\n' $T > $T/config/nextgdrive/settings.toml
 export XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data
-nextgdrive config sync-root $T/GoogleDrive && nextgdrive sync select <email> <folder-id> && nextgdrive sync run
+nextgdrive sync select <email> <folder-id> && nextgdrive sync run
 ```
+
+Two such environments syncing the same folder act as two computers, which is how upload, move, conflict and trash behavior is checked end to end.
 
 ### Google OAuth client
 

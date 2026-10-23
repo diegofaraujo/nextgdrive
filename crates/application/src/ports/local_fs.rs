@@ -9,6 +9,21 @@ pub struct LocalMetadata {
     pub is_dir: bool,
     pub size: u64,
     pub modified: SystemTime,
+    /// Survives renames and moves within a filesystem, which is how moved
+    /// files are recognized.
+    pub inode: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirEntry {
+    pub name: String,
+    pub metadata: LocalMetadata,
+}
+
+/// Content of a local file being uploaded.
+pub trait FileReader: Send {
+    /// Fills `buf` as far as possible; returns 0 at the end of the file.
+    fn read(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, PortError>> + Send;
 }
 
 /// A file being written. Its content only appears at the target path once
@@ -23,6 +38,16 @@ pub trait FileWriter: Send {
 /// The local side of the sync. Paths are absolute.
 pub trait LocalFileSystem: Sync {
     type Writer: FileWriter;
+    type Reader: FileReader;
+
+    /// Files and directories directly inside `path`. Symbolic links and names
+    /// that are not valid UTF-8 are left out: they cannot be synced.
+    fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, PortError>;
+
+    fn open_read(
+        &self,
+        path: &Path,
+    ) -> impl Future<Output = Result<Self::Reader, PortError>> + Send;
 
     /// `None` if nothing exists at the path.
     fn metadata(&self, path: &Path) -> Result<Option<LocalMetadata>, PortError>;

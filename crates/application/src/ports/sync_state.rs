@@ -28,6 +28,7 @@ pub struct SyncedItem {
     /// either differs now, the user changed the file locally.
     pub local_size: u64,
     pub local_modified: SystemTime,
+    pub local_inode: u64,
 }
 
 /// Remembers the state of synced items, per account.

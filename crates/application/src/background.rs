@@ -1,7 +1,7 @@
 //! Keeps accounts in sync over time. Front-ends call [`BackgroundSync::tick`]
 //! periodically (the GUI tray app, `nextgdrive daemon`).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -11,11 +11,12 @@ use crate::ports::{
     AccountRepository, Authenticator, CredentialStore, DriveService, LocalFileSystem,
     SettingsRepository, SyncStateStore,
 };
-use crate::use_cases::{SyncAccount, SyncProgress, SyncReport};
+use crate::use_cases::{Deletions, SyncAccount, SyncOptions, SyncProgress, SyncReport};
 use crate::{AppError, TokenProvider};
 
-/// Even without remote changes, sync this often: it restores files deleted
-/// locally, which Drive's change feed cannot report.
+/// Even without reported changes, sync this often: a safety net for local
+/// changes the file watcher missed (it cannot see changes made while the
+/// app was not running, for example).
 pub const FULL_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
@@ -27,6 +28,19 @@ pub enum SyncEvent<'a> {
     UpToDate(&'a Account),
     /// Could not even check (network, credentials…).
     CheckFailed(&'a Account, &'a AppError),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TickOptions {
+    /// Sync every account with a selection, changed or not.
+    pub force: bool,
+    /// See [`SyncOptions::conflict_label`].
+    pub conflict_label: String,
+    /// Accounts whose many local deletions the user confirmed.
+    pub confirmed_deletions: HashSet<AccountId>,
+    /// Something changed in the local folders since the last tick (the
+    /// change feed only reports changes in Drive).
+    pub local_changes: bool,
 }
 
 /// What was true at an account's last successful sync.
@@ -79,7 +93,7 @@ where
     /// or settings cannot be read; per-account problems become events.
     pub async fn tick(
         &self,
-        force: bool,
+        options: &TickOptions,
         on_event: &(dyn Fn(SyncEvent<'_>) + Sync),
     ) -> Result<(), AppError> {
         let settings = self.settings.load().map_err(AppError::Storage)?;
@@ -88,7 +102,7 @@ where
             if selection.is_empty() {
                 continue;
             }
-            self.check(&account, selection, force, on_event).await;
+            self.check(&account, selection, options, on_event).await;
         }
         Ok(())
     }
@@ -97,7 +111,7 @@ where
         &self,
         account: &Account,
         selection: BTreeSet<DriveItemId>,
-        force: bool,
+        options: &TickOptions,
         on_event: &(dyn Fn(SyncEvent<'_>) + Sync),
     ) {
         let changes = async {
@@ -117,14 +131,26 @@ where
         let stale = self.lock_memory().get(&account.id).is_none_or(|m| {
             m.selection != selection || m.synced_at.elapsed() >= FULL_SYNC_INTERVAL
         });
-        if !(force || changes.any || stale) {
+        let confirmed = options.confirmed_deletions.contains(&account.id);
+        if !(options.force || options.local_changes || confirmed || changes.any || stale) {
             return on_event(SyncEvent::UpToDate(account));
         }
 
         on_event(SyncEvent::Started(account));
         let on_progress = |p: &SyncProgress| on_event(SyncEvent::Progress(account, p));
         let result = SyncAccount::new(self.tokens, self.drive, self.fs, self.settings, self.state)
-            .execute(account, &on_progress)
+            .execute(
+                account,
+                &SyncOptions {
+                    conflict_label: options.conflict_label.clone(),
+                    deletions: if confirmed {
+                        Deletions::Trash
+                    } else {
+                        Deletions::Ask
+                    },
+                },
+                &on_progress,
+            )
             .await;
         // Advance in the change feed only once everything up to it is synced;
         // otherwise the next tick tries again.
@@ -202,17 +228,23 @@ mod tests {
         force: bool,
     ) -> Vec<String> {
         let events = Mutex::new(Vec::new());
-        bg.tick(force, &|event| {
-            let summary = match event {
-                SyncEvent::Started(_) => "started".to_owned(),
-                SyncEvent::Progress(..) => return,
-                SyncEvent::Finished(_, Ok(r)) => format!("synced {}", r.downloaded),
-                SyncEvent::Finished(_, Err(e)) => format!("failed {e}"),
-                SyncEvent::UpToDate(_) => "up to date".to_owned(),
-                SyncEvent::CheckFailed(_, e) => format!("check failed {e}"),
-            };
-            events.lock().unwrap().push(summary);
-        })
+        bg.tick(
+            &TickOptions {
+                force,
+                ..TickOptions::default()
+            },
+            &|event| {
+                let summary = match event {
+                    SyncEvent::Started(_) => "started".to_owned(),
+                    SyncEvent::Progress(..) => return,
+                    SyncEvent::Finished(_, Ok(r)) => format!("synced {}", r.downloaded),
+                    SyncEvent::Finished(_, Err(e)) => format!("failed {e}"),
+                    SyncEvent::UpToDate(_) => "up to date".to_owned(),
+                    SyncEvent::CheckFailed(_, e) => format!("check failed {e}"),
+                };
+                events.lock().unwrap().push(summary);
+            },
+        )
         .await
         .unwrap();
         events.into_inner().unwrap()
@@ -252,8 +284,11 @@ mod tests {
 
     #[tokio::test]
     async fn remote_changes_trigger_a_sync() {
-        let mut w = world();
-        background(&w).tick(false, &|_| {}).await.unwrap();
+        let w = world();
+        background(&w)
+            .tick(&TickOptions::default(), &|_| {})
+            .await
+            .unwrap();
         let cursor = w.state.cursor(&w.ana.id).unwrap();
         w.drive.set_content("a", "alpha v2");
 
@@ -283,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_sync_keeps_the_cursor_so_it_retries() {
-        let mut w = world();
+        let w = world();
         w.drive.fail_listing("docs");
         let bg = background(&w);
 
@@ -291,6 +326,28 @@ mod tests {
 
         assert!(events[1].starts_with("failed"), "{events:?}");
         assert_eq!(w.state.cursor(&w.ana.id).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn local_changes_trigger_a_sync() {
+        let w = world();
+        let bg = background(&w);
+        tick(&bg, false).await;
+        let local = TickOptions {
+            local_changes: true,
+            ..TickOptions::default()
+        };
+
+        let events = Mutex::new(0);
+        bg.tick(&local, &|e| {
+            if matches!(e, SyncEvent::Started(_)) {
+                *events.lock().unwrap() += 1;
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*events.lock().unwrap(), 1);
     }
 
     #[tokio::test]

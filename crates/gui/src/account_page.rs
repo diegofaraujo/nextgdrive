@@ -4,7 +4,10 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use nextgdrive_application::use_cases::{ConflictReason, SkipReason, SyncProgress, SyncReport};
+use nextgdrive_application::AppError;
+use nextgdrive_application::use_cases::{
+    Deletions, SkipReason, SyncOptions, SyncProgress, SyncReport,
+};
 use nextgdrive_domain::Account;
 use nextgdrive_i18n::FluentValue;
 
@@ -190,6 +193,10 @@ impl AccountPage {
     }
 
     fn sync(self: &Rc<Self>) {
+        self.sync_with(Deletions::Ask);
+    }
+
+    fn sync_with(self: &Rc<Self>, deletions: Deletions) {
         if !self.ctx.begin_sync(&self.account.id) {
             return;
         }
@@ -213,6 +220,10 @@ impl AccountPage {
         let weak = Rc::downgrade(self);
         let ctx = self.ctx.clone();
         let id = self.account.id.clone();
+        let options = SyncOptions {
+            conflict_label: nextgdrive_composition::conflict_label(&self.ctx.i18n),
+            deletions,
+        };
         spawn(
             async move {
                 let on_progress = move |p: &SyncProgress| {
@@ -220,7 +231,7 @@ impl AccountPage {
                 };
                 services
                     .sync_account()
-                    .execute(&account, &on_progress)
+                    .execute(&account, &options, &on_progress)
                     .await
             },
             move |result| {
@@ -230,6 +241,7 @@ impl AccountPage {
                 state.refresh_selection();
                 match result {
                     Ok(report) => state.show_report(&report),
+                    Err(AppError::MassDeletion { count }) => state.ask_about_deletions(count),
                     Err(e) => {
                         let message = state.ctx.i18n.app_error(&e);
                         state.sync_row.set_subtitle(&message);
@@ -238,6 +250,39 @@ impl AccountPage {
                 }
             },
         );
+    }
+
+    /// Many files were deleted here at once: trash them in Drive, or bring them back?
+    fn ask_about_deletions(self: &Rc<Self>, count: usize) {
+        let i18n = &self.ctx.i18n;
+        let dialog = adw::AlertDialog::new(
+            Some(&i18n.tr_args("gui-deletions-title", [("count", FluentValue::from(count))])),
+            Some(&i18n.tr("gui-deletions-body")),
+        );
+        dialog.add_responses(&[
+            ("cancel", &i18n.tr("gui-cancel")),
+            ("restore", &i18n.tr("gui-deletions-restore")),
+            ("trash", &i18n.tr("gui-deletions-trash")),
+        ]);
+        dialog.set_response_appearance("trash", adw::ResponseAppearance::Destructive);
+        dialog.set_response_appearance("restore", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("restore"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let Some(state) = weak.upgrade() else { return };
+            match response {
+                "trash" => state.sync_with(Deletions::Trash),
+                "restore" => state.sync_with(Deletions::Restore),
+                _ => state.sync_row.set_subtitle(
+                    &state
+                        .ctx
+                        .i18n
+                        .tr_args("error-mass-deletion", [("count", FluentValue::from(count))]),
+                ),
+            }
+        });
+        dialog.present(self.ctx.window().as_ref());
     }
 
     fn show_progress(&self, progress: &SyncProgress) {
@@ -264,15 +309,7 @@ impl AccountPage {
 
     fn show_report(&self, report: &SyncReport) {
         let i18n = &self.ctx.i18n;
-        self.sync_row.set_subtitle(&i18n.tr_args(
-            "gui-sync-result",
-            [
-                ("downloaded", FluentValue::from(report.downloaded)),
-                ("bytes", i18n.bytes(report.downloaded_bytes).into()),
-                ("moved", FluentValue::from(report.moved)),
-                ("removed", FluentValue::from(report.removed)),
-            ],
-        ));
+        self.sync_row.set_subtitle(&i18n.sync_summary(report));
 
         let group = adw::PreferencesGroup::new();
         let base = self.account_dir();
@@ -301,17 +338,19 @@ impl AccountPage {
             }
             expander
         };
+        if !report.conflict_copies.is_empty() {
+            let rows = report
+                .conflict_copies
+                .iter()
+                .map(|p| (relative(p), None))
+                .collect();
+            group.add(&list("gui-report-copies", "edit-copy-symbolic", rows));
+        }
         if !report.conflicts.is_empty() {
             let rows = report
                 .conflicts
                 .iter()
-                .map(|c| {
-                    let why = match c.reason {
-                        ConflictReason::ChangedLocally => i18n.tr("gui-conflict-changed"),
-                        ConflictReason::AlreadyExists => i18n.tr("gui-conflict-exists"),
-                    };
-                    (relative(&c.path), Some(why))
-                })
+                .map(|c| (relative(&c.path), Some(i18n.conflict_reason(c.reason))))
                 .collect();
             group.add(&list(
                 "gui-report-conflicts",

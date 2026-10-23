@@ -197,7 +197,11 @@ mod tests {
                 &self.settings,
                 &self.state,
             )
-            .execute(&self.ana, &|_| {})
+            .execute(
+                &self.ana,
+                &crate::use_cases::SyncOptions::default(),
+                &|_| {},
+            )
             .await
             .unwrap();
         }
