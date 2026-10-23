@@ -6,7 +6,7 @@ use nextgdrive_application::ports::{
 };
 use nextgdrive_domain::{
     Account, AccountId, Capabilities, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind,
-    StorageQuota,
+    StorageQuota, TrashedItem,
 };
 use oauth2::reqwest::{Method, StatusCode, header};
 use serde::Deserialize;
@@ -215,6 +215,24 @@ struct FileCapabilities {
     can_edit: Option<bool>,
     can_trash: Option<bool>,
     can_remove_my_drive_parent: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashedFile {
+    #[serde(flatten)]
+    file: File,
+    trashed_time: Option<String>,
+    /// False for items trashed only because their folder was.
+    explicitly_trashed: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashList {
+    next_page_token: Option<String>,
+    #[serde(default)]
+    files: Vec<TrashedFile>,
 }
 
 #[derive(Deserialize)]
@@ -488,6 +506,44 @@ impl DriveService for GoogleDrive {
         Ok(())
     }
 
+    async fn trashed_items(&self, token: &AccessToken) -> Result<Vec<TrashedItem>, PortError> {
+        let fields = format!("nextPageToken,files({FILE_FIELDS},trashedTime,explicitlyTrashed)");
+        let files = self
+            .get_all(
+                token,
+                endpoint(&["files"]),
+                &[
+                    ("q", "trashed = true"),
+                    // trashedTime only exists for shared drive items; recency
+                    // is the closest order Drive offers for the rest.
+                    ("orderBy", "recency desc"),
+                    ("fields", &fields),
+                    ("pageSize", "1000"),
+                    ("corpora", "allDrives"),
+                    ("includeItemsFromAllDrives", "true"),
+                    ("supportsAllDrives", "true"),
+                ],
+                |page: TrashList| (page.files, page.next_page_token),
+            )
+            .await?;
+        trashed_to_items(files)
+    }
+
+    async fn restore(&self, token: &AccessToken, id: &DriveItemId) -> Result<DriveItem, PortError> {
+        let body = serde_json::json!({ "trashed": false });
+        let query = [("fields", FILE_FIELDS), ("supportsAllDrives", "true")];
+        let file: File = self
+            .send(
+                token,
+                Method::PATCH,
+                endpoint(&["files", id.as_str()]),
+                &query,
+                &body,
+            )
+            .await?;
+        file_to_item(file)
+    }
+
     async fn remove_from_my_drive(
         &self,
         token: &AccessToken,
@@ -556,6 +612,25 @@ fn number(value: Option<String>) -> Result<Option<u64>, PortError> {
     value
         .map(|v| v.parse::<u64>().map_err(PortError::new))
         .transpose()
+}
+
+fn trashed_to_items(files: Vec<TrashedFile>) -> Result<Vec<TrashedItem>, PortError> {
+    files
+        .into_iter()
+        .filter(|f| f.explicitly_trashed.unwrap_or(true))
+        .map(|f| {
+            let trashed_at = f
+                .trashed_time
+                .as_deref()
+                .map(humantime::parse_rfc3339)
+                .transpose()
+                .map_err(PortError::new)?;
+            Ok(TrashedItem {
+                item: file_to_item(f.file)?,
+                trashed_at,
+            })
+        })
+        .collect()
 }
 
 fn file_to_item(file: File) -> Result<DriveItem, PortError> {
@@ -702,6 +777,24 @@ mod tests {
         // Unknown means no: never attempt what Drive did not allow.
         let unknown = item(r#"{"id":"3","name":"c","mimeType":"text/plain"}"#);
         assert!(!unknown.capabilities.trash && !unknown.capabilities.edit);
+    }
+
+    #[test]
+    fn lists_only_explicitly_trashed_items() {
+        let page: TrashList = serde_json::from_str(
+            r#"{"files":[
+                {"id":"1","name":"Docs","mimeType":"application/vnd.google-apps.folder",
+                 "trashedTime":"2026-10-20T10:00:00Z","explicitlyTrashed":true},
+                {"id":"2","name":"inside.txt","mimeType":"text/plain","explicitlyTrashed":false}]}"#,
+        )
+        .unwrap();
+        let items = trashed_to_items(page.files).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item.name, "Docs");
+        assert_eq!(
+            items[0].trashed_at,
+            humantime::parse_rfc3339("2026-10-20T10:00:00Z").ok()
+        );
     }
 
     #[test]

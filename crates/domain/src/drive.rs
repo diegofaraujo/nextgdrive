@@ -84,3 +84,11 @@ pub enum ItemKind {
     /// Content the user cannot download (e.g. download disabled by the owner).
     NotDownloadable,
 }
+
+/// An item the user moved to the trash. Drive deletes it for good after 30 days.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashedItem {
+    pub item: DriveItem,
+    /// Drive only reports it for items in shared drives.
+    pub trashed_at: Option<SystemTime>,
+}

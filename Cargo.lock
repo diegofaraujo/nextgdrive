@@ -1843,6 +1843,7 @@ name = "nextgdrive-i18n"
 version = "0.1.0"
 dependencies = [
  "fluent-templates",
+ "jiff",
  "nextgdrive-application",
  "nextgdrive-domain",
  "sys-locale",

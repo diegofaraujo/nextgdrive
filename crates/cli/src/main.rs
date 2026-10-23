@@ -18,7 +18,7 @@ use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
 use nextgdrive_i18n::{FluentValue, Localizer};
 
-use cli::{AccountCommand, Command, ConfigCommand, SyncCommand};
+use cli::{AccountCommand, Command, ConfigCommand, SyncCommand, TrashCommand};
 
 fn main() -> ExitCode {
     let i18n = Localizer::from_system();
@@ -43,6 +43,55 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     let app_error = |e: AppError| i18n.app_error(&e);
     match command {
         Command::Daemon => daemon(i18n).await?,
+        Command::Trash(TrashCommand::List { email }) => {
+            let services = Services::new(i18n).await?;
+            let account = find_account(&services.local, &email, i18n)?;
+            let entries = services
+                .drive_trash()
+                .list(&account)
+                .await
+                .map_err(app_error)?;
+            if entries.is_empty() {
+                println!("{}", i18n.tr("cli-trash-empty"));
+            }
+            for entry in entries {
+                let location = entry
+                    .location
+                    .unwrap_or_else(|| i18n.tr("trash-location-unknown"));
+                let line = i18n.tr_args(
+                    "cli-trash-entry",
+                    [
+                        ("name", entry.item.name.into()),
+                        ("location", location.into()),
+                        ("id", entry.item.id.to_string().into()),
+                    ],
+                );
+                match entry.trashed_at {
+                    Some(at) => println!("{}  {line}", i18n.date_time(at)),
+                    None => println!("{line}"),
+                }
+            }
+        }
+        Command::Trash(TrashCommand::Restore { email, id }) => {
+            let services = Services::new(i18n).await?;
+            let account = find_account(&services.local, &email, i18n)?;
+            let trash = services.drive_trash();
+            // Look it up first, to say where it went back to.
+            let entry = trash
+                .list(&account)
+                .await
+                .map_err(app_error)?
+                .into_iter()
+                .find(|e| e.item.id.as_str() == id);
+            let item = trash
+                .restore(&account, &DriveItemId::new(id))
+                .await
+                .map_err(app_error)?;
+            println!(
+                "{}",
+                restored_message(i18n, &item.name, entry.and_then(|e| e.location))
+            );
+        }
         Command::Status => match Client::connect().await {
             None => println!("{}", i18n.tr("cli-status-not-running")),
             Some(client) => {
@@ -421,6 +470,19 @@ fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> boo
     }
     println!("{}: {}", account.email, i18n.sync_summary(report));
     !report.failures.is_empty()
+}
+
+fn restored_message(i18n: &Localizer, name: &str, location: Option<String>) -> String {
+    match location {
+        Some(location) => i18n.tr_args(
+            "trash-restored",
+            [
+                ("name", name.to_owned().into()),
+                ("location", location.into()),
+            ],
+        ),
+        None => i18n.tr_args("trash-restored-unknown", [("name", name.to_owned().into())]),
+    }
 }
 
 fn find_account(local: &LocalServices, email: &str, i18n: &Localizer) -> Result<Account, String> {
