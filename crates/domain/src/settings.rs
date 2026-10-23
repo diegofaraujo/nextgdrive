@@ -15,6 +15,8 @@ pub struct Settings {
     pub shared_drives_folder: String,
     /// How often background sync checks Drive for changes, in seconds.
     pub poll_interval_secs: u64,
+    /// Desktop notifications about conflicts and problems.
+    pub notifications: bool,
     /// Folders (or drive roots) chosen for download, per account. Everything
     /// inside a selected folder is synced. Accounts start with nothing selected.
     pub selections: BTreeMap<AccountId, BTreeSet<DriveItemId>>,

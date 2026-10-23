@@ -64,6 +64,18 @@ status-syncing = Sincronizando { $email }: { $done } de { $total } arquivos
 status-paused = Sincronização pausada
 status-problem = Problema em { $email }: { $message }
 
+notify-conflict-title = { $count ->
+    [one] Um arquivo foi alterado em dois lugares
+   *[other] { $count } arquivos foram alterados em dois lugares
+}
+notify-attention-title = { $count ->
+    [one] 1 item precisa de atenção
+   *[other] { $count } itens precisam de atenção
+}
+notify-problem-title = Não foi possível sincronizar { $email }
+notify-and-more = { $list } e mais { $count }
+notify-open = Abrir
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -205,6 +217,10 @@ gui-deletions-body = Mandá-los também para a lixeira do Google Drive, onde pod
 gui-deletions-restore = Restaurar arquivos
 gui-deletions-trash = Mover para a lixeira
 gui-sync-title = Sincronização
+gui-shared-drives = Drives compartilhados
+gui-shared-drives-description = Drives compartilhados com você pela sua equipe ou organização.
+gui-notifications = Notificações
+gui-notifications-subtitle = Avisar sobre conflitos e problemas na sincronização
 
 ## Errors
 

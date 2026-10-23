@@ -1,6 +1,7 @@
 //! Background sync as a long-running service: the loop shared by the tray
 //! app and `nextgdrive daemon`, controllable in-process and over D-Bus.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -29,6 +30,38 @@ enum Command {
 
 /// Translated line describing something background sync did, for logs.
 pub type LogSink = Box<dyn Fn(String) + Send + Sync>;
+
+/// Receives what deserves the user's attention, for desktop notifications.
+pub type NoticeSink = Box<dyn Fn(Notice) + Send + Sync>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    /// Files changed on both sides were kept as conflict copies.
+    ConflictCopies,
+    /// Items were left alone (read-only, cannot be deleted…).
+    NeedsAttention,
+    /// Many local deletions wait for the user's decision.
+    ConfirmDeletions,
+    /// Syncing an account failed.
+    Problem,
+}
+
+/// Something to tell the user, already translated.
+#[derive(Debug, Clone)]
+pub struct Notice {
+    pub kind: NoticeKind,
+    pub account: String,
+    pub title: String,
+    pub body: String,
+}
+
+/// Where background sync reports to. Each problem is notified once, until
+/// the account syncs fine again.
+struct Reporter {
+    log: LogSink,
+    notify: NoticeSink,
+    last_problem: Mutex<std::collections::HashMap<String, String>>,
+}
 
 /// Handle to the running background sync. Dropping it stops the sync.
 pub struct SyncHost {
@@ -81,6 +114,7 @@ impl SyncHost {
         services: Arc<Services>,
         i18n: Localizer,
         log: LogSink,
+        notify: NoticeSink,
     ) -> Result<Self, StartError> {
         let (commands, receiver) = mpsc::unbounded_channel();
         let (status_tx, status) = watch::channel(HostStatus {
@@ -94,7 +128,12 @@ impl SyncHost {
                 ServeError::AlreadyRunning => StartError::AlreadyRunning,
                 ServeError::Bus(e) => StartError::Bus(e.to_string()),
             })?;
-        let task = tokio::spawn(run(services, i18n, log, receiver, status_tx));
+        let reporter = Reporter {
+            log,
+            notify,
+            last_problem: Mutex::default(),
+        };
+        let task = tokio::spawn(run(services, i18n, reporter, receiver, status_tx));
         Ok(Self {
             control,
             task,
@@ -142,7 +181,7 @@ fn unix_now() -> i64 {
 async fn run(
     services: Arc<Services>,
     i18n: Localizer,
-    log: LogSink,
+    reporter: Reporter,
     mut commands: mpsc::UnboundedReceiver<Command>,
     status: watch::Sender<HostStatus>,
 ) {
@@ -178,7 +217,7 @@ async fn run(
             let errors = Mutex::new(Vec::new());
             let finished = {
                 let on_event =
-                    |event: SyncEvent<'_>| on_event(&i18n, &log, &status, &errors, event);
+                    |event: SyncEvent<'_>| on_event(&i18n, &reporter, &status, &errors, event);
                 let options = TickOptions {
                     force: std::mem::take(&mut force),
                     conflict_label: crate::conflict_label(&i18n),
@@ -273,16 +312,12 @@ async fn settle(events: &mut mpsc::UnboundedReceiver<()>) {
 
 fn on_event(
     i18n: &Localizer,
-    log: &LogSink,
+    reporter: &Reporter,
     status: &watch::Sender<HostStatus>,
     errors: &Mutex<Vec<(String, String)>>,
     event: SyncEvent<'_>,
 ) {
-    let push_error = |email: &str, e: &AppError| {
-        if let Ok(mut errors) = errors.lock() {
-            errors.push((email.to_owned(), i18n.app_error(e)));
-        }
-    };
+    let log = &reporter.log;
     match event {
         SyncEvent::Started(account) => {
             status.send_modify(|s| {
@@ -302,7 +337,8 @@ fn on_event(
             s.bytes_total = p.bytes_total;
         }),
         SyncEvent::Finished(account, Ok(report)) => {
-            log(format!("{}: {}", account.email, i18n.sync_summary(report)));
+            let email = account.email.to_string();
+            log(format!("{email}: {}", i18n.sync_summary(report)));
             for copy in &report.conflict_copies {
                 log(i18n.tr_args(
                     "sync-conflict-copy",
@@ -312,17 +348,108 @@ fn on_event(
             for conflict in &report.conflicts {
                 log(i18n.conflict_line(conflict));
             }
+            reporter.recovered(&email);
+            let names = |paths: Vec<&std::path::Path>| file_list(i18n, &paths);
+            if !report.conflict_copies.is_empty() {
+                let paths = report
+                    .conflict_copies
+                    .iter()
+                    .map(PathBuf::as_path)
+                    .collect();
+                reporter.notice(Notice {
+                    kind: NoticeKind::ConflictCopies,
+                    title: i18n.tr_args(
+                        "notify-conflict-title",
+                        [("count", FluentValue::from(report.conflict_copies.len()))],
+                    ),
+                    body: names(paths),
+                    account: email.clone(),
+                });
+            }
+            if !report.conflicts.is_empty() {
+                let paths = report.conflicts.iter().map(|c| c.path.as_path()).collect();
+                reporter.notice(Notice {
+                    kind: NoticeKind::NeedsAttention,
+                    title: i18n.tr_args(
+                        "notify-attention-title",
+                        [("count", FluentValue::from(report.conflicts.len()))],
+                    ),
+                    body: names(paths),
+                    account: email,
+                });
+            }
         }
         // Someone else (e.g. a one-off `nextgdrive sync run`) is on it.
         SyncEvent::Finished(_, Err(AppError::SyncInProgress(_))) => {}
         SyncEvent::Finished(account, Err(e)) | SyncEvent::CheckFailed(account, e) => {
-            push_error(account.email.as_str(), e);
-            log(format!("{}: {}", account.email, i18n.app_error(e)));
+            let email = account.email.to_string();
+            let message = i18n.app_error(e);
+            if let Ok(mut errors) = errors.lock() {
+                errors.push((email.clone(), message.clone()));
+            }
+            log(format!("{email}: {message}"));
+            let kind = match e {
+                AppError::MassDeletion { .. } => NoticeKind::ConfirmDeletions,
+                _ => NoticeKind::Problem,
+            };
+            reporter.problem(Notice {
+                kind,
+                title: i18n.tr_args("notify-problem-title", [("email", email.clone().into())]),
+                body: message,
+                account: email,
+            });
         }
-        SyncEvent::UpToDate(_) => {}
+        SyncEvent::UpToDate(account) => reporter.recovered(account.email.as_str()),
     }
 }
 
+impl Reporter {
+    fn notice(&self, notice: Notice) {
+        (self.notify)(notice);
+    }
+
+    /// Notifies a problem unless the same one was already notified.
+    fn problem(&self, notice: Notice) {
+        let Ok(mut last) = self.last_problem.lock() else {
+            return;
+        };
+        if last.get(&notice.account) == Some(&notice.body) {
+            return;
+        }
+        last.insert(notice.account.clone(), notice.body.clone());
+        drop(last);
+        self.notice(notice);
+    }
+
+    fn recovered(&self, email: &str) {
+        if let Ok(mut last) = self.last_problem.lock() {
+            last.remove(email);
+        }
+    }
+}
+
+/// "a.txt, b.txt and 3 more": file names only, to keep notifications short.
+fn file_list(i18n: &Localizer, paths: &[&std::path::Path]) -> String {
+    const SHOWN: usize = 3;
+    let names: Vec<String> = paths
+        .iter()
+        .take(SHOWN)
+        .map(|p| {
+            p.file_name().map_or_else(
+                || p.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    let list = names.join(", ");
+    match paths.len().saturating_sub(SHOWN) {
+        0 => list,
+        more => i18n.tr_args(
+            "notify-and-more",
+            [("list", list.into()), ("count", FluentValue::from(more))],
+        ),
+    }
+}
 /// One-line, translated summary of a status, as shown in the tray and by
 /// `nextgdrive status`.
 pub fn describe(i18n: &Localizer, status: &HostStatus) -> String {
@@ -363,5 +490,56 @@ pub fn describe(i18n: &Localizer, status: &HostStatus) -> String {
         }
         Some((_, message)) => format!("{line}\n{message}"),
         None => line,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reporter(sent: Arc<Mutex<Vec<String>>>) -> Reporter {
+        Reporter {
+            log: Box::new(|_| {}),
+            notify: Box::new(move |n| sent.lock().unwrap().push(n.body)),
+            last_problem: Mutex::default(),
+        }
+    }
+
+    fn problem(body: &str) -> Notice {
+        Notice {
+            kind: NoticeKind::Problem,
+            account: "ana@x.com".into(),
+            title: String::new(),
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn each_problem_is_notified_once_until_it_recovers() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reporter = reporter(sent.clone());
+
+        reporter.problem(problem("offline"));
+        reporter.problem(problem("offline"));
+        reporter.problem(problem("token expired"));
+        reporter.recovered("ana@x.com");
+        reporter.problem(problem("offline"));
+
+        assert_eq!(
+            *sent.lock().unwrap(),
+            ["offline", "token expired", "offline"]
+        );
+    }
+
+    #[test]
+    fn long_file_lists_are_shortened() {
+        let i18n = Localizer::new("en-US");
+        let paths: Vec<PathBuf> = ["/d/a.txt", "/d/b.txt", "/d/c.txt", "/d/e.txt", "/d/f.txt"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let paths: Vec<&std::path::Path> = paths.iter().map(PathBuf::as_path).collect();
+        assert_eq!(file_list(&i18n, &paths), "a.txt, b.txt, c.txt and 2 more");
+        assert_eq!(file_list(&i18n, &paths[..1]), "a.txt");
     }
 }

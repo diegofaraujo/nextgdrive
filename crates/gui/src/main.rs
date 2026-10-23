@@ -9,6 +9,7 @@ mod accounts_page;
 mod autostart;
 mod ctx;
 mod folders_page;
+mod notifications;
 mod preferences;
 mod tray;
 
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use gtk::glib;
 use nextgdrive_composition::Services;
-use nextgdrive_composition::host::{StartError, SyncHost};
+use nextgdrive_composition::host::{Notice, StartError, SyncHost};
 use nextgdrive_i18n::Localizer;
 
 const APP_ID: &str = "io.github.diegofaraujo.NextGDrive";
@@ -53,11 +54,38 @@ fn activate(app: &adw::Application, hidden: bool) {
         Ok(services) => Arc::new(services),
         Err(message) => return show_error(&window, &message),
     };
+    // Notices come from the sync thread; notifications are sent from GTK's.
+    let (notices_tx, mut notices) = tokio::sync::mpsc::unbounded_channel::<Notice>();
+    let notify = Box::new(move |notice: Notice| {
+        let _ = notices_tx.send(notice);
+    });
     let host = ctx::runtime().block_on(SyncHost::start(
         services.clone(),
         i18n.clone(),
         Box::new(|_| {}),
+        notify,
     ));
+    let (app_ref, notifying) = (app.downgrade(), services.clone());
+    glib::spawn_future_local(async move {
+        while let Some(notice) = notices.recv().await {
+            let enabled = notifying
+                .local
+                .get_settings()
+                .execute()
+                .is_ok_and(|s| s.notifications);
+            if let (true, Some(app)) = (enabled, app_ref.upgrade()) {
+                notifications::send(&app, &notice);
+            }
+        }
+    });
+    let show = gtk::gio::SimpleAction::new("show-window", None);
+    let shown = window.downgrade();
+    show.connect_activate(move |_, _| {
+        if let Some(window) = shown.upgrade() {
+            window.present();
+        }
+    });
+    app.add_action(&show);
 
     let nav = adw::NavigationView::new();
     let toasts = adw::ToastOverlay::new();

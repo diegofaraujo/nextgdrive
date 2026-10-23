@@ -66,6 +66,7 @@ impl Default for InMemorySettings {
             my_drive_folder: "My Drive".into(),
             shared_drives_folder: "Shared drives".into(),
             poll_interval_secs: Settings::DEFAULT_POLL_INTERVAL_SECS,
+            notifications: true,
             selections: BTreeMap::new(),
         }))
     }

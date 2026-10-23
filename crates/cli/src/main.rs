@@ -351,7 +351,8 @@ async fn daemon(i18n: &Localizer) -> Result<(), String> {
         .map_err(|e| i18n.app_error(&e))?
         .poll_interval_secs;
     let log = Box::new(|line: String| println!("{line}"));
-    let host = match SyncHost::start(services, i18n.clone(), log).await {
+    // Without a desktop, the log above already says everything.
+    let host = match SyncHost::start(services, i18n.clone(), log, Box::new(|_| {})).await {
         Ok(host) => host,
         Err(StartError::AlreadyRunning) => return Err(i18n.tr("cli-daemon-already-running")),
         Err(StartError::Bus(details)) => {
