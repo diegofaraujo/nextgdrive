@@ -12,9 +12,9 @@ use nextgdrive_domain::{
 };
 
 use crate::ports::{
-    AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, Changes,
-    CredentialStore, DirEntry, DriveAccountInfo, DriveService, FileReader, FileWriter,
-    LocalFileSystem, LocalMetadata, PendingAuthorization, PortError, RefreshToken,
+    AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, BlockCache,
+    BlockKey, Changes, CredentialStore, DirEntry, DriveAccountInfo, DriveService, FileReader,
+    FileWriter, LocalFileSystem, LocalMetadata, PendingAuthorization, PortError, RefreshToken,
     SettingsRepository, SyncStateStore, SyncedItem, UploadTarget,
 };
 
@@ -185,6 +185,8 @@ pub struct FakeDrive {
     account: Account,
     inner: Mutex<DriveState>,
     pub changes_calls: AtomicUsize,
+    /// Calls to `download_range`, to check what reads actually fetch.
+    pub range_calls: AtomicUsize,
 }
 
 #[derive(Default)]
@@ -282,6 +284,7 @@ impl FakeDrive {
             account,
             inner: Mutex::new(state),
             changes_calls: AtomicUsize::new(0),
+            range_calls: AtomicUsize::new(0),
         }
     }
 
@@ -599,6 +602,29 @@ impl DriveService for FakeDrive {
         state.hide(id);
         state.trashed.push(id.clone());
         Ok(())
+    }
+
+    async fn download_range(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        offset: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, PortError> {
+        Self::check(token)?;
+        self.range_calls.fetch_add(1, Ordering::Relaxed);
+        let state = self.state();
+        let content = state
+            .contents
+            .get(id)
+            .ok_or_else(|| PortError::new("no content"))?;
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(content.len());
+        let end = start
+            .saturating_add(usize::try_from(len).unwrap_or(usize::MAX))
+            .min(content.len());
+        Ok(content[start..end].to_vec())
     }
 
     async fn trashed_items(&self, token: &AccessToken) -> Result<Vec<TrashedItem>, PortError> {
@@ -998,5 +1024,20 @@ pub fn account(id: &str, email: &str) -> Account {
         id: AccountId::new(id),
         email: Email::parse(email).unwrap(),
         display_name: None,
+    }
+}
+
+/// Block cache in memory, without a size limit.
+#[derive(Default)]
+pub struct InMemoryBlocks(Mutex<HashMap<BlockKey, Vec<u8>>>);
+
+impl BlockCache for InMemoryBlocks {
+    fn get(&self, key: &BlockKey) -> Result<Option<Vec<u8>>, PortError> {
+        Ok(self.0.lock().unwrap().get(key).cloned())
+    }
+
+    fn put(&self, key: &BlockKey, data: &[u8]) -> Result<(), PortError> {
+        self.0.lock().unwrap().insert(key.clone(), data.to_vec());
+        Ok(())
     }
 }

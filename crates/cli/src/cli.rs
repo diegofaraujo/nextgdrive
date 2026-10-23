@@ -14,6 +14,7 @@ pub enum Command {
     Config(ConfigCommand),
     Sync(SyncCommand),
     Trash(TrashCommand),
+    Stream { email: String, mountpoint: PathBuf },
 }
 
 pub enum TrashCommand {
@@ -198,6 +199,18 @@ fn command(i18n: &Localizer) -> clap::Command {
                 ),
         )
         .subcommand(
+            clap::Command::new("stream")
+                .about(i18n.tr("cli-stream-about"))
+                .arg(email("cli-account-email"))
+                .arg(
+                    Arg::new("mountpoint")
+                        .value_name("FOLDER")
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf))
+                        .help(i18n.tr("cli-stream-mountpoint")),
+                ),
+        )
+        .subcommand(
             group("trash", "cli-trash-about")
                 .subcommand(
                     clap::Command::new("list")
@@ -301,6 +314,13 @@ fn from_matches(matches: &ArgMatches) -> Command {
             },
             _ => no_subcommand(),
         }),
+        Some(("stream", m)) => Command::Stream {
+            email: string(m, "email"),
+            mountpoint: m
+                .get_one::<PathBuf>("mountpoint")
+                .cloned()
+                .unwrap_or_default(),
+        },
         Some(("trash", m)) => Command::Trash(match m.subcommand() {
             Some(("list", m)) => TrashCommand::List {
                 email: string(m, "email"),

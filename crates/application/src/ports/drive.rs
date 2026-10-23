@@ -132,4 +132,13 @@ pub trait DriveService: Sync {
         token: &AccessToken,
         id: &DriveItemId,
     ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
+
+    /// Up to `len` bytes of a file's content from `offset`; fewer at the end.
+    fn download_range(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        offset: u64,
+        len: u64,
+    ) -> impl Future<Output = Result<Vec<u8>, PortError>> + Send;
 }

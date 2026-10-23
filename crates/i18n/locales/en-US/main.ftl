@@ -146,6 +146,10 @@ cli-trash-restore-about = Put an item back where it was
 cli-trash-item-id = Item id, as shown by "trash list"
 cli-trash-empty = The trash is empty.
 cli-trash-entry = { $name }  (in { $location })  [{ $id }]
+cli-stream-about = Show an account's whole Google Drive in a folder, downloading files only when they are opened (read-only for now)
+cli-stream-mountpoint = Folder to show it in (created if missing; must be empty)
+cli-stream-mounted = Google Drive is available in { $path }. Press Ctrl+C to stop.
+cli-stream-unmounted = Google Drive folder closed.
 
 ## GUI
 
@@ -260,3 +264,4 @@ error-dbus = Could not use the session bus (D-Bus): { $details }
 error-local-folder-missing = The synced folder { $path } is missing (an unmounted disk?). Nothing was changed in Google Drive; sync resumes when the folder is back.
 error-mass-deletion = { $count } files were deleted on this computer. Confirm before they go to the Google Drive trash, or restore them.
 error-folder-exists = A folder already exists at { $path }. Choose another location, or move or remove that folder first.
+error-mount = Could not show Google Drive in { $path }: { $details }

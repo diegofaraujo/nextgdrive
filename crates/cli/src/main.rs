@@ -43,6 +43,7 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     let app_error = |e: AppError| i18n.app_error(&e);
     match command {
         Command::Daemon => daemon(i18n).await?,
+        Command::Stream { email, mountpoint } => stream(i18n, &email, &mountpoint).await?,
         Command::Trash(TrashCommand::List { email }) => {
             let services = Services::new(i18n).await?;
             let account = find_account(&services.local, &email, i18n)?;
@@ -470,6 +471,49 @@ fn print_report(i18n: &Localizer, account: &Account, report: &SyncReport) -> boo
     }
     println!("{}: {}", account.email, i18n.sync_summary(report));
     !report.failures.is_empty()
+}
+
+/// Shows an account's whole Drive at `mountpoint` until interrupted.
+async fn stream(i18n: &Localizer, email: &str, mountpoint: &std::path::Path) -> Result<(), String> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let services = Arc::new(Services::new(i18n).await?);
+    let account = find_account(&services.local, email, i18n)?;
+    let mountpoint = std::path::absolute(mountpoint).unwrap_or_else(|_| mountpoint.to_owned());
+    std::fs::create_dir_all(&mountpoint).map_err(|e| {
+        i18n.tr_args(
+            "error-mount",
+            [
+                ("path", mountpoint.display().to_string().into()),
+                ("details", e.to_string().into()),
+            ],
+        )
+    })?;
+    let cache = nextgdrive_composition::stream::open_cache(i18n)?;
+    let log = Box::new(|line: String| eprintln!("{line}"));
+    let mount = nextgdrive_composition::stream::mount(
+        services,
+        cache,
+        account,
+        &mountpoint,
+        i18n.clone(),
+        log,
+    )?;
+    println!(
+        "{}",
+        i18n.tr_args(
+            "cli-stream-mounted",
+            [("path", mountpoint.display().to_string().into())]
+        )
+    );
+    let mut terminate = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+    drop(mount);
+    println!("{}", i18n.tr("cli-stream-unmounted"));
+    Ok(())
 }
 
 fn restored_message(i18n: &Localizer, name: &str, location: Option<String>) -> String {

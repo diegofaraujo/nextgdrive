@@ -2,6 +2,7 @@
 //! Each failure is returned as a localized message, ready to show.
 
 pub mod host;
+pub mod stream;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

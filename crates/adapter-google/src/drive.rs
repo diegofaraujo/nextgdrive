@@ -506,6 +506,50 @@ impl DriveService for GoogleDrive {
         Ok(())
     }
 
+    async fn download_range(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+        offset: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, PortError> {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        let response = self
+            .http
+            .get(endpoint(&["files", id.as_str()]))
+            .query(&[("alt", "media"), ("supportsAllDrives", "true")])
+            .bearer_auth(token.secret())
+            .header(
+                header::RANGE,
+                format!("bytes={offset}-{}", offset + len - 1),
+            )
+            .send()
+            .await
+            .map_err(PortError::new)?;
+        if response.status() == StatusCode::RANGE_NOT_SATISFIABLE {
+            return Ok(Vec::new()); // Starts past the end.
+        }
+        let ranged = response.status() == StatusCode::PARTIAL_CONTENT;
+        let bytes = check_status(response)
+            .await?
+            .bytes()
+            .await
+            .map_err(PortError::new)?;
+        if ranged {
+            return Ok(bytes.to_vec());
+        }
+        // The whole file came back: cut out the range.
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(bytes.len());
+        let end = start
+            .saturating_add(usize::try_from(len).unwrap_or(usize::MAX))
+            .min(bytes.len());
+        Ok(bytes[start..end].to_vec())
+    }
+
     async fn trashed_items(&self, token: &AccessToken) -> Result<Vec<TrashedItem>, PortError> {
         let fields = format!("nextPageToken,files({FILE_FIELDS},trashedTime,explicitlyTrashed)");
         let files = self

@@ -146,6 +146,10 @@ cli-trash-restore-about = Devolver un elemento a donde estaba
 cli-trash-item-id = Id del elemento, como lo muestra "trash list"
 cli-trash-empty = La papelera está vacía.
 cli-trash-entry = { $name }  (en { $location })  [{ $id }]
+cli-stream-about = Mostrar todo el Google Drive de una cuenta en una carpeta, descargando los archivos solo cuando se abren (solo lectura por ahora)
+cli-stream-mountpoint = Carpeta donde mostrarlo (se crea si no existe; debe estar vacía)
+cli-stream-mounted = Google Drive está disponible en { $path }. Pulsa Ctrl+C para detener.
+cli-stream-unmounted = Carpeta de Google Drive cerrada.
 
 ## GUI
 
@@ -260,3 +264,4 @@ error-dbus = No se pudo usar el bus de la sesión (D-Bus): { $details }
 error-local-folder-missing = No se encuentra la carpeta sincronizada { $path } (¿un disco desmontado?). No se cambió nada en Google Drive; la sincronización sigue cuando vuelva la carpeta.
 error-mass-deletion = Se eliminaron { $count } archivos en este equipo. Confirma antes de que vayan a la papelera de Google Drive, o restáuralos.
 error-folder-exists = Ya existe una carpeta en { $path }. Elige otra ubicación, o mueve o elimina esa carpeta primero.
+error-mount = No se pudo mostrar Google Drive en { $path }: { $details }

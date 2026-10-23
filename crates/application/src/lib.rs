@@ -4,6 +4,7 @@
 pub mod background;
 mod error;
 pub mod ports;
+pub mod streaming;
 mod tokens;
 pub mod use_cases;
 

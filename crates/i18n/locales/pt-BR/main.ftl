@@ -146,6 +146,10 @@ cli-trash-restore-about = Devolver um item para onde ele estava
 cli-trash-item-id = Id do item, como mostrado por "trash list"
 cli-trash-empty = A lixeira está vazia.
 cli-trash-entry = { $name }  (em { $location })  [{ $id }]
+cli-stream-about = Mostrar todo o Google Drive de uma conta numa pasta, baixando os arquivos só quando forem abertos (somente leitura por enquanto)
+cli-stream-mountpoint = Pasta onde mostrar (criada se não existir; precisa estar vazia)
+cli-stream-mounted = O Google Drive está disponível em { $path }. Pressione Ctrl+C para parar.
+cli-stream-unmounted = Pasta do Google Drive fechada.
 
 ## GUI
 
@@ -260,3 +264,4 @@ error-dbus = Não foi possível usar o barramento da sessão (D-Bus): { $details
 error-local-folder-missing = A pasta sincronizada { $path } não foi encontrada (um disco desmontado?). Nada foi alterado no Google Drive; a sincronização continua quando a pasta voltar.
 error-mass-deletion = { $count } arquivos foram apagados neste computador. Confirme antes de eles irem para a lixeira do Google Drive, ou restaure-os.
 error-folder-exists = Já existe uma pasta em { $path }. Escolha outro local, ou mova ou remova essa pasta antes.
+error-mount = Não foi possível mostrar o Google Drive em { $path }: { $details }
