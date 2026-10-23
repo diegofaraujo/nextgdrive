@@ -16,14 +16,29 @@ use nextgdrive_i18n::Localizer;
 
 use crate::Services;
 
-/// Cached blocks of streamed files, shared by all accounts.
-pub const DEFAULT_CACHE_LIMIT: u64 = 5 << 30;
 const QUOTA_TTL: Duration = Duration::from_secs(5 * 60);
 /// How often staged files are checked for uploading: new files once quiet
 /// (`StreamConfig::new_file_quiet`), failed ones after their backoff.
 const UPLOAD_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
-type Log = Box<dyn Fn(String) + Send + Sync>;
+/// Something a mount did that is worth telling, already translated.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Log(String),
+    /// A file changed in Drive while being edited here; this copy kept the edit.
+    ConflictCopy {
+        account: String,
+        name: String,
+    },
+    /// Uploading failed; the content is safe and will be retried.
+    UploadFailed {
+        account: String,
+        name: String,
+        message: String,
+    },
+}
+
+pub type EventSink = Box<dyn Fn(StreamEvent) + Send + Sync>;
 
 struct AccountStream {
     services: Arc<Services>,
@@ -32,7 +47,7 @@ struct AccountStream {
     account: Account,
     state: StreamState,
     quota: Mutex<Option<(Instant, StorageQuota)>>,
-    log: Log,
+    events: EventSink,
     i18n: Localizer,
 }
 
@@ -62,10 +77,10 @@ impl AccountStream {
 
     fn log_outcome(&self, outcome: &UploadOutcome) {
         if let Some(copy) = &outcome.conflict_copy {
-            (self.log)(
-                self.i18n
-                    .tr_args("sync-conflict-copy", [("path", copy.clone().into())]),
-            );
+            (self.events)(StreamEvent::ConflictCopy {
+                account: self.account.email.to_string(),
+                name: copy.clone(),
+            });
         }
     }
 
@@ -73,7 +88,11 @@ impl AccountStream {
         for (name, result) in self.fs().upload_pending().await {
             match result {
                 Ok(outcome) => self.log_outcome(&outcome),
-                Err(e) => (self.log)(format!("{name}: {}", self.i18n.app_error(&e))),
+                Err(e) => (self.events)(StreamEvent::UploadFailed {
+                    account: self.account.email.to_string(),
+                    name,
+                    message: self.i18n.app_error(&e),
+                }),
             }
         }
     }
@@ -162,15 +181,18 @@ impl StreamBackend for AccountStream {
             StreamError::Failed(e) => self.i18n.app_error(e),
             other => format!("{other:?}"),
         };
-        (self.log)(format!("{}: {message}", self.account.email));
+        (self.events)(StreamEvent::Log(format!(
+            "{}: {message}",
+            self.account.email
+        )));
     }
 }
 
-/// Opens the block cache in the XDG cache directory.
-pub fn open_cache(i18n: &Localizer) -> Result<Arc<DiskBlockCache>, String> {
+/// Opens the block cache in the XDG cache directory, shared by all accounts.
+pub fn open_cache(i18n: &Localizer, limit: u64) -> Result<Arc<DiskBlockCache>, String> {
     let dir =
         nextgdrive_adapter_config::cache_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
-    DiskBlockCache::open(dir.join("blocks"), DEFAULT_CACHE_LIMIT)
+    DiskBlockCache::open(dir.join("blocks"), limit)
         .map(Arc::new)
         .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))
 }
@@ -196,14 +218,10 @@ pub fn mount(
     account: Account,
     mountpoint: &Path,
     i18n: Localizer,
-    log: Log,
+    events: EventSink,
 ) -> Result<StreamMount, String> {
-    let storage_error = |e: String| i18n.tr_args("error-storage", [("details", e.into())]);
-    let data =
-        nextgdrive_adapter_config::data_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
-    // One staging folder per account: its pending files belong to its Drive.
-    let staging = DiskStaging::open(data.join("staging").join(account.id.as_str()))
-        .map_err(|e| storage_error(e.to_string()))?;
+    let staging = open_staging(&i18n, &account)?;
+    clear_stale_mount(mountpoint);
     let stream = Arc::new(AccountStream {
         services,
         cache,
@@ -211,12 +229,14 @@ pub fn mount(
         account,
         state: StreamState::new(StreamConfig::default()),
         quota: Mutex::default(),
-        log,
+        events,
         i18n: i18n.clone(),
     });
     let pending = stream.fs().recover().map_err(|e| i18n.app_error(&e))?;
     if pending > 0 {
-        (stream.log)(i18n.tr_args("stream-pending", [("count", pending.into())]));
+        (stream.events)(StreamEvent::Log(
+            i18n.tr_args("stream-pending", [("count", pending.into())]),
+        ));
     }
     let mount = nextgdrive_adapter_fuse::mount(
         stream.clone(),
@@ -242,4 +262,30 @@ pub fn mount(
         _mount: mount,
         retry,
     })
+}
+
+/// The account's streamed files not uploaded yet. One folder per account:
+/// its pending files belong to its Drive.
+pub fn open_staging(i18n: &Localizer, account: &Account) -> Result<DiskStaging, String> {
+    let data =
+        nextgdrive_adapter_config::data_dir().ok_or_else(|| i18n.tr("error-no-config-dir"))?;
+    DiskStaging::open(data.join("staging").join(account.id.as_str()))
+        .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))
+}
+
+/// After a crash the mount point is left dead ("Transport endpoint is not
+/// connected") and cannot be mounted again until it is unmounted.
+fn clear_stale_mount(mountpoint: &Path) {
+    let dead = matches!(std::fs::metadata(mountpoint), Err(e) if e.raw_os_error() == Some(107)); // ENOTCONN
+    if dead {
+        let _ = std::process::Command::new("fusermount3")
+            .args(["-u", "-z"])
+            .arg(mountpoint)
+            .status();
+    }
+}
+
+/// Whether a folder is empty (or missing), so a Drive can be mounted on it.
+pub fn is_empty_dir(path: &Path) -> bool {
+    std::fs::read_dir(path).map_or(true, |mut entries| entries.next().is_none())
 }

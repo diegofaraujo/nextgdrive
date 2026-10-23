@@ -88,6 +88,10 @@ impl Localizer {
                 [("email", email.to_string().into())],
             ),
             AppError::SyncInProgress(_) => self.tr("error-sync-in-progress"),
+            AppError::PendingUploads(count) => self.tr_args(
+                "error-pending-uploads",
+                [("count", FluentValue::from(*count))],
+            ),
             AppError::FolderExists(path) => self.tr_args(
                 "error-folder-exists",
                 [("path", path.display().to_string().into())],

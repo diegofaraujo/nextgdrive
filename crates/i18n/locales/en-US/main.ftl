@@ -73,6 +73,8 @@ notify-attention-title = { $count ->
    *[other] { $count } items need attention
 }
 notify-problem-title = Could not sync { $email }
+notify-mount-failed-title = Could not open the Google Drive folder of { $email }
+notify-upload-failed-title = Could not upload “{ $name }” yet
 notify-and-more = { $list } and { $count } more
 notify-open = Open
 
@@ -86,6 +88,9 @@ stream-pending = { $count ->
     [one] 1 file written earlier was not in Google Drive yet; uploading it.
    *[other] { $count } files written earlier were not in Google Drive yet; uploading them.
 }
+
+kept-files-label = kept files
+mode-kept-files = Files that existed only on this computer were moved to { $path }.
 
 ## CLI
 
@@ -155,6 +160,11 @@ cli-stream-about = Show an account's whole Google Drive in a folder, downloading
 cli-stream-mountpoint = Folder to show it in (created if missing; must be empty)
 cli-stream-mounted = Google Drive is available in { $path }. Press Ctrl+C to stop.
 cli-stream-unmounted = Google Drive folder closed.
+cli-config-mode-about = Mirror selected folders, or stream the whole Drive (files downloaded when opened)
+cli-config-mode-value = "mirror" or "stream"
+cli-mode-stream = { $email } now streams its whole Google Drive in its folder.
+cli-mode-mirror = { $email } now mirrors selected folders. Choose them with "nextgdrive sync select".
+cli-stream-already-mounted = { $email } is already streamed by the Next GDrive running in the background, in its folder.
 
 ## GUI
 
@@ -249,6 +259,18 @@ gui-trash-empty-description = Items deleted from Google Drive stay here for 30 d
 gui-trash-restore = Restore
 gui-trash-entry = In { $location }
 gui-trash-entry-dated = In { $location } · deleted { $date }
+gui-mode = Mode
+gui-mode-mirror = Mirror selected folders
+gui-mode-stream = Stream the whole Drive
+gui-mode-mirror-subtitle = Chosen folders are copied to this computer and work offline
+gui-mode-stream-subtitle = Everything is shown; files are downloaded when opened
+gui-mode-stream-title = Stream the Whole Drive?
+gui-mode-stream-body = The account folder will show your whole Google Drive, downloading files only when they are opened. Downloaded copies are removed from this computer (they stay in Google Drive and appear again in the folder). Files that exist only on this computer are moved to a separate folder, never deleted.
+gui-mode-stream-action = Stream
+gui-mode-mirror-title = Mirror Selected Folders?
+gui-mode-mirror-body = The account folder will hold copies of the folders you choose, kept in sync and available offline. Choose them in Folders to Sync.
+gui-mode-mirror-action = Mirror
+gui-mode-switched = Mode changed.
 
 ## Errors
 
@@ -270,3 +292,8 @@ error-local-folder-missing = The synced folder { $path } is missing (an unmounte
 error-mass-deletion = { $count } files were deleted on this computer. Confirm before they go to the Google Drive trash, or restore them.
 error-folder-exists = A folder already exists at { $path }. Choose another location, or move or remove that folder first.
 error-mount = Could not show Google Drive in { $path }: { $details }
+error-pending-uploads = { $count ->
+    [one] 1 file written in the streamed folder is not in Google Drive yet. Try again once it is uploaded.
+   *[other] { $count } files written in the streamed folder are not in Google Drive yet. Try again once they are uploaded.
+}
+error-mount-not-empty = The folder { $path } is not empty, so the streamed Google Drive cannot be shown there. Move its content elsewhere.

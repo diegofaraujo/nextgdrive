@@ -20,4 +20,4 @@ nextgdrive-application = { version = "0.1.0", path = "../application" }
 nextgdrive-composition = { version = "0.1.0", path = "../composition" }
 nextgdrive-domain = { version = "0.1.0", path = "../domain" }
 nextgdrive-i18n = { version = "0.1.0", path = "../i18n" }
-tokio = { version = "1.54.1", features = ["macros", "rt", "signal", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "rt-multi-thread", "signal", "time"] }

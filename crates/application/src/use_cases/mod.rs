@@ -7,6 +7,7 @@ mod local_copies;
 mod remove_account;
 mod settings;
 mod sync;
+mod sync_mode;
 mod trash;
 
 pub use add_account::AddAccount;
@@ -23,4 +24,5 @@ pub use sync::{
 
 #[cfg(test)]
 pub(crate) mod fakes;
+pub use sync_mode::{ModeChange, SetSyncMode};
 pub use trash::{DriveTrash, TrashEntry};

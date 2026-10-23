@@ -487,3 +487,22 @@ async fn edits_of_existing_files_upload_on_close() {
 
     assert_eq!(w.drive.content("a").as_deref(), Some("now"));
 }
+
+#[tokio::test]
+async fn deleting_a_file_while_it_uploads_leaves_nothing_in_drive() {
+    let w = world(Duration::from_secs(60));
+    let docs = w.docs().await;
+    let file = w.fs().create(docs, "gone.txt").await.unwrap();
+    w.fs().write(file.attr.id, 0, b"short-lived").unwrap();
+
+    // The upload pauses midway; the file is deleted meanwhile.
+    let fs = w.fs();
+    let (_, deleted) = tokio::join!(fs.upload_pending(), fs.unlink(docs, "gone.txt"));
+    deleted.unwrap();
+
+    assert!(
+        w.drive.find("docs", "gone.txt").is_none(),
+        "deleted file left in Drive"
+    );
+    assert_eq!(w.staging.count(), 0);
+}

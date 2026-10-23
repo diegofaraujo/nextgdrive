@@ -1,6 +1,7 @@
 //! Background sync as a long-running service: the loop shared by the tray
 //! app and `nextgdrive daemon`, controllable in-process and over D-Bus.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -13,7 +14,7 @@ use std::collections::HashSet;
 
 use nextgdrive_application::background::{SyncEvent, TickOptions};
 use nextgdrive_application::ports::AccountRepository;
-use nextgdrive_domain::{AccountId, Email};
+use nextgdrive_domain::{Account, AccountId, Email, Settings, SyncMode};
 use nextgdrive_i18n::{FluentValue, Localizer};
 use tokio::sync::{mpsc, watch};
 
@@ -133,7 +134,7 @@ impl SyncHost {
             notify,
             last_problem: Mutex::default(),
         };
-        let task = tokio::spawn(run(services, i18n, reporter, receiver, status_tx));
+        let task = tokio::spawn(run(services, i18n, Arc::new(reporter), receiver, status_tx));
         Ok(Self {
             control,
             task,
@@ -181,7 +182,7 @@ fn unix_now() -> i64 {
 async fn run(
     services: Arc<Services>,
     i18n: Localizer,
-    reporter: Reporter,
+    reporter: Arc<Reporter>,
     mut commands: mpsc::UnboundedReceiver<Command>,
     status: watch::Sender<HostStatus>,
 ) {
@@ -191,10 +192,10 @@ async fn run(
     let mut confirmed: HashSet<AccountId> = HashSet::new();
     // Local changes, reported by the file watcher.
     let (local_tx, mut local_rx) = mpsc::unbounded_channel::<()>();
-    let mut watched: Option<(
-        std::path::PathBuf,
-        nextgdrive_adapter_localfs::ChangeWatcher,
-    )> = None;
+    // One watcher per mirrored account folder: never the sync folder as a
+    // whole, which holds streamed mounts a recursive watch would walk.
+    let mut watched: HashMap<PathBuf, nextgdrive_adapter_localfs::ChangeWatcher> = HashMap::new();
+    let mut mounts = Mounts::default();
     let mut local_changes = false;
     // Confirming applies to the next sync only.
     let account_id = |email: &str| -> Option<AccountId> {
@@ -202,16 +203,32 @@ async fn run(
         Some(services.local.accounts.find_by_email(&email).ok()??.id)
     };
     loop {
-        // Watch the sync folder, again whenever it changes (or appears).
-        if let Ok(settings) = services.local.get_settings().execute()
-            && watched.as_ref().map(|(root, _)| root) != Some(&settings.sync_root)
-        {
-            let tx = local_tx.clone();
-            watched = nextgdrive_adapter_localfs::watch(&settings.sync_root, move || {
-                let _ = tx.send(());
-            })
-            .ok()
-            .map(|watcher| (settings.sync_root, watcher));
+        if let (Ok(settings), Ok(accounts)) = (
+            services.local.get_settings().execute(),
+            services.local.list_accounts().execute(),
+        ) {
+            // Mounts first: a folder switched back to mirroring must be
+            // unmounted before it is watched, or the recursive watch walks the
+            // whole streamed Drive (and, answered on this runtime, can hang it).
+            mounts.reconcile(&services, &settings, &accounts, &i18n, &reporter);
+            let mirrored: Vec<PathBuf> = accounts
+                .iter()
+                .filter(|a| settings.mode(&a.id) == SyncMode::Mirror)
+                .map(|a| settings.account_dir(a))
+                .filter(|dir| !mounts.is_mounted(dir) && dir.is_dir())
+                .collect();
+            watched.retain(|dir, _| mirrored.contains(dir));
+            for dir in mirrored {
+                if let std::collections::hash_map::Entry::Vacant(slot) = watched.entry(dir) {
+                    let tx = local_tx.clone();
+                    let watch = nextgdrive_adapter_localfs::watch(slot.key(), move || {
+                        let _ = tx.send(());
+                    });
+                    if let Ok(watcher) = watch {
+                        slot.insert(watcher);
+                    }
+                }
+            }
         }
         if !paused {
             let errors = Mutex::new(Vec::new());
@@ -301,6 +318,126 @@ async fn run(
             },
         }
     }
+}
+
+/// Streamed accounts mounted by this host, keyed by account.
+#[derive(Default)]
+struct Mounts {
+    mounted: HashMap<AccountId, (PathBuf, crate::stream::StreamMount)>,
+    cache: Option<Arc<nextgdrive_adapter_cache::DiskBlockCache>>,
+}
+
+impl Mounts {
+    fn is_mounted(&self, dir: &std::path::Path) -> bool {
+        self.mounted.values().any(|(mounted, _)| mounted == dir)
+    }
+
+    /// Mounts accounts switched to streaming and unmounts the others.
+    fn reconcile(
+        &mut self,
+        services: &Arc<Services>,
+        settings: &Settings,
+        accounts: &[Account],
+        i18n: &Localizer,
+        reporter: &Arc<Reporter>,
+    ) {
+        let wanted: HashMap<AccountId, (&Account, PathBuf)> = accounts
+            .iter()
+            .filter(|a| settings.mode(&a.id) == SyncMode::Stream)
+            .map(|a| (a.id.clone(), (a, settings.account_dir(a))))
+            .collect();
+        // Unmounted when dropped (also remounted if the sync folder moved).
+        // Unmounting runs `fusermount`: not on this runtime's threads.
+        let stale: Vec<AccountId> = self
+            .mounted
+            .iter()
+            .filter(|(id, (dir, _))| {
+                wanted
+                    .get(*id)
+                    .is_none_or(|(_, wanted_dir)| wanted_dir != dir)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in stale {
+            if let Some(mount) = self.mounted.remove(&id) {
+                tokio::task::spawn_blocking(move || drop(mount));
+            }
+        }
+        for (id, (account, dir)) in wanted {
+            if self.mounted.contains_key(&id) {
+                continue;
+            }
+            let problem = |message: String| {
+                reporter.problem(Notice {
+                    kind: NoticeKind::Problem,
+                    title: i18n.tr_args(
+                        "notify-mount-failed-title",
+                        [("email", account.email.to_string().into())],
+                    ),
+                    body: message,
+                    account: account.email.to_string(),
+                });
+            };
+            if std::fs::create_dir_all(&dir).is_err() || !crate::stream::is_empty_dir(&dir) {
+                problem(i18n.tr_args(
+                    "error-mount-not-empty",
+                    [("path", dir.display().to_string().into())],
+                ));
+                continue;
+            }
+            let cache = match &self.cache {
+                Some(cache) => cache.clone(),
+                None => match crate::stream::open_cache(i18n, settings.cache_limit) {
+                    Ok(cache) => self.cache.insert(cache).clone(),
+                    Err(message) => return problem(message),
+                },
+            };
+            match crate::stream::mount(
+                services.clone(),
+                cache,
+                account.clone(),
+                &dir,
+                i18n.clone(),
+                stream_events(reporter.clone(), i18n.clone()),
+            ) {
+                Ok(mount) => {
+                    reporter.recovered(account.email.as_str());
+                    self.mounted.insert(id, (dir, mount));
+                }
+                Err(message) => problem(message),
+            }
+        }
+    }
+}
+
+/// Mount events, as logs and notifications.
+fn stream_events(reporter: Arc<Reporter>, i18n: Localizer) -> crate::stream::EventSink {
+    use crate::stream::StreamEvent;
+    Box::new(move |event| match event {
+        StreamEvent::Log(line) => (reporter.log)(line),
+        StreamEvent::ConflictCopy { account, name } => {
+            (reporter.log)(i18n.tr_args("sync-conflict-copy", [("path", name.clone().into())]));
+            reporter.notice(Notice {
+                kind: NoticeKind::ConflictCopies,
+                title: i18n.tr_args("notify-conflict-title", [("count", FluentValue::from(1))]),
+                body: name,
+                account,
+            });
+        }
+        StreamEvent::UploadFailed {
+            account,
+            name,
+            message,
+        } => {
+            (reporter.log)(format!("{account}: {name}: {message}"));
+            reporter.problem(Notice {
+                kind: NoticeKind::Problem,
+                title: i18n.tr_args("notify-upload-failed-title", [("name", name.into())]),
+                body: message,
+                account,
+            });
+        }
+    })
 }
 
 /// Waits until local changes stop for a moment, so that saving a file (often

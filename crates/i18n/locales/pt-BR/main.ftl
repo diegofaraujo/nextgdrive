@@ -73,6 +73,8 @@ notify-attention-title = { $count ->
    *[other] { $count } itens precisam de atenção
 }
 notify-problem-title = Não foi possível sincronizar { $email }
+notify-mount-failed-title = Não foi possível abrir a pasta do Google Drive de { $email }
+notify-upload-failed-title = Ainda não foi possível enviar “{ $name }”
 notify-and-more = { $list } e mais { $count }
 notify-open = Abrir
 
@@ -86,6 +88,9 @@ stream-pending = { $count ->
     [one] 1 arquivo gravado antes ainda não estava no Google Drive; enviando.
    *[other] { $count } arquivos gravados antes ainda não estavam no Google Drive; enviando.
 }
+
+kept-files-label = arquivos mantidos
+mode-kept-files = Os arquivos que só existiam neste computador foram movidos para { $path }.
 
 ## CLI
 
@@ -155,6 +160,11 @@ cli-stream-about = Mostrar todo o Google Drive de uma conta numa pasta, baixando
 cli-stream-mountpoint = Pasta onde mostrar (criada se não existir; precisa estar vazia)
 cli-stream-mounted = O Google Drive está disponível em { $path }. Pressione Ctrl+C para parar.
 cli-stream-unmounted = Pasta do Google Drive fechada.
+cli-config-mode-about = Espelhar as pastas selecionadas, ou transmitir todo o Drive (arquivos baixados ao abrir)
+cli-config-mode-value = "mirror" (espelhar) ou "stream" (transmitir)
+cli-mode-stream = { $email } agora transmite todo o Google Drive na pasta dela.
+cli-mode-mirror = { $email } agora espelha as pastas selecionadas. Escolha-as com "nextgdrive sync select".
+cli-stream-already-mounted = { $email } já é transmitida na pasta dela pelo Next GDrive em segundo plano.
 
 ## GUI
 
@@ -249,6 +259,18 @@ gui-trash-empty-description = Os itens apagados do Google Drive ficam aqui por 3
 gui-trash-restore = Restaurar
 gui-trash-entry = Em { $location }
 gui-trash-entry-dated = Em { $location } · apagado em { $date }
+gui-mode = Modo
+gui-mode-mirror = Espelhar pastas selecionadas
+gui-mode-stream = Transmitir todo o Drive
+gui-mode-mirror-subtitle = As pastas escolhidas são copiadas para este computador e funcionam offline
+gui-mode-stream-subtitle = Tudo é mostrado; os arquivos são baixados quando abertos
+gui-mode-stream-title = Transmitir todo o Drive?
+gui-mode-stream-body = A pasta da conta vai mostrar todo o seu Google Drive, baixando os arquivos só quando forem abertos. As cópias baixadas são removidas deste computador (elas continuam no Google Drive e aparecem de novo na pasta). Arquivos que só existem neste computador são movidos para uma pasta separada, nunca apagados.
+gui-mode-stream-action = Transmitir
+gui-mode-mirror-title = Espelhar pastas selecionadas?
+gui-mode-mirror-body = A pasta da conta vai guardar cópias das pastas que você escolher, sincronizadas e disponíveis offline. Escolha-as em Pastas para sincronizar.
+gui-mode-mirror-action = Espelhar
+gui-mode-switched = Modo alterado.
 
 ## Errors
 
@@ -270,3 +292,8 @@ error-local-folder-missing = A pasta sincronizada { $path } não foi encontrada 
 error-mass-deletion = { $count } arquivos foram apagados neste computador. Confirme antes de eles irem para a lixeira do Google Drive, ou restaure-os.
 error-folder-exists = Já existe uma pasta em { $path }. Escolha outro local, ou mova ou remova essa pasta antes.
 error-mount = Não foi possível mostrar o Google Drive em { $path }: { $details }
+error-pending-uploads = { $count ->
+    [one] 1 arquivo gravado na pasta transmitida ainda não está no Google Drive. Tente de novo depois que ele for enviado.
+   *[other] { $count } arquivos gravados na pasta transmitida ainda não estão no Google Drive. Tente de novo depois que forem enviados.
+}
+error-mount-not-empty = A pasta { $path } não está vazia, então o Google Drive transmitido não pode ser mostrado nela. Mova o conteúdo dela para outro lugar.

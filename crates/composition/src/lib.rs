@@ -19,7 +19,7 @@ use nextgdrive_application::TokenProvider;
 use nextgdrive_application::background::BackgroundSync;
 use nextgdrive_application::use_cases::{
     AddAccount, BrowseDrive, ChangeSelection, DriveTrash, GetAccountStatus, GetSettings,
-    ListAccounts, RemoveAccount, SetNotifications, SetSyncRoot, SyncAccount,
+    ListAccounts, RemoveAccount, SetNotifications, SetSyncMode, SetSyncRoot, SyncAccount,
 };
 use nextgdrive_domain::Settings;
 use nextgdrive_i18n::Localizer;
@@ -64,6 +64,20 @@ impl LocalServices {
 
     pub fn get_settings(&self) -> GetSettings<'_, TomlSettingsRepository> {
         GetSettings::new(&self.settings)
+    }
+
+    /// `staging` is the account's (see [`stream::open_staging`]).
+    pub fn set_sync_mode<'a>(
+        &'a self,
+        staging: &'a nextgdrive_adapter_localfs::DiskStaging,
+    ) -> SetSyncMode<
+        'a,
+        TomlSettingsRepository,
+        SqliteSyncState,
+        Filesystem,
+        nextgdrive_adapter_localfs::DiskStaging,
+    > {
+        SetSyncMode::new(&self.settings, &self.state, &self.fs, staging)
     }
 
     pub fn set_notifications(&self) -> SetNotifications<'_, TomlSettingsRepository> {
@@ -258,6 +272,9 @@ fn default_settings(i18n: &Localizer) -> Result<Settings, String> {
         shared_drives_folder: i18n.tr("folder-shared-drives"),
         poll_interval_secs: Settings::DEFAULT_POLL_INTERVAL_SECS,
         notifications: true,
+        streamed: std::collections::BTreeSet::new(),
+        offline: BTreeMap::new(),
+        cache_limit: Settings::DEFAULT_CACHE_LIMIT,
         selections: BTreeMap::new(),
     })
 }

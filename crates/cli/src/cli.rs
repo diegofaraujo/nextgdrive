@@ -32,6 +32,7 @@ pub enum AccountCommand {
 pub enum ConfigCommand {
     Show,
     SyncRoot { path: PathBuf },
+    Mode { email: String, stream: bool },
 }
 
 pub enum SyncCommand {
@@ -131,6 +132,18 @@ fn command(i18n: &Localizer) -> clap::Command {
                                 .required(true)
                                 .value_parser(value_parser!(PathBuf))
                                 .help(i18n.tr("cli-config-sync-root-path")),
+                        ),
+                )
+                .subcommand(
+                    clap::Command::new("mode")
+                        .about(i18n.tr("cli-config-mode-about"))
+                        .arg(email("cli-account-email"))
+                        .arg(
+                            Arg::new("mode")
+                                .value_name("MODE")
+                                .required(true)
+                                .value_parser(["mirror", "stream"])
+                                .help(i18n.tr("cli-config-mode-value")),
                         ),
                 ),
         )
@@ -285,6 +298,10 @@ fn from_matches(matches: &ArgMatches) -> Command {
             Some(("show", _)) => ConfigCommand::Show,
             Some(("sync-root", m)) => ConfigCommand::SyncRoot {
                 path: m.get_one::<PathBuf>("path").cloned().unwrap_or_default(),
+            },
+            Some(("mode", m)) => ConfigCommand::Mode {
+                email: string(m, "email"),
+                stream: string(m, "mode") == "stream",
             },
             _ => no_subcommand(),
         }),

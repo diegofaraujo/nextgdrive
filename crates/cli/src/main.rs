@@ -14,8 +14,9 @@ use nextgdrive_application::use_cases::{
     Deletions, LocalCopies, SkipReason, SyncOptions, SyncProgress, SyncReport,
 };
 use nextgdrive_composition::host::{self, StartError, SyncHost};
+use nextgdrive_composition::stream::StreamEvent;
 use nextgdrive_composition::{LocalServices, Services};
-use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email};
+use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email, SyncMode};
 use nextgdrive_i18n::{FluentValue, Localizer};
 
 use cli::{AccountCommand, Command, ConfigCommand, SyncCommand, TrashCommand};
@@ -23,7 +24,9 @@ use cli::{AccountCommand, Command, ConfigCommand, SyncCommand, TrashCommand};
 fn main() -> ExitCode {
     let i18n = Localizer::from_system();
     let command = cli::parse(&i18n);
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // Multi-threaded: a streamed mount answers kernel requests on this runtime
+    // while other work runs on it.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("failed to start the async runtime");
@@ -207,6 +210,42 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
                         ]
                     )
                 );
+            }
+        }
+        Command::Config(ConfigCommand::Mode { email, stream }) => {
+            let local = LocalServices::new(i18n)?;
+            let account = find_account(&local, &email, i18n)?;
+            let staging = nextgdrive_composition::stream::open_staging(i18n, &account)?;
+            let mode = if stream {
+                SyncMode::Stream
+            } else {
+                SyncMode::Mirror
+            };
+            let change = local
+                .set_sync_mode(&staging)
+                .execute(&account, mode, &i18n.tr("kept-files-label"))
+                .map_err(app_error)?;
+            if let Some(kept) = &change.kept_folder {
+                println!(
+                    "{}",
+                    i18n.tr_args(
+                        "mode-kept-files",
+                        [("path", kept.display().to_string().into())]
+                    )
+                );
+            }
+            let id = if stream {
+                "cli-mode-stream"
+            } else {
+                "cli-mode-mirror"
+            };
+            println!(
+                "{}",
+                i18n.tr_args(id, [("email", account.email.to_string().into())])
+            );
+            // The background process mounts or unmounts on its next round.
+            if let Some(client) = Client::connect().await {
+                let _ = client.sync_now().await;
             }
         }
         Command::Config(ConfigCommand::SyncRoot { path }) => {
@@ -489,15 +528,31 @@ async fn stream(i18n: &Localizer, email: &str, mountpoint: &std::path::Path) -> 
             ],
         )
     })?;
-    let cache = nextgdrive_composition::stream::open_cache(i18n)?;
-    let log = Box::new(|line: String| eprintln!("{line}"));
+    // Two mounts of one account would upload its pending files twice.
+    let settings = services
+        .local
+        .get_settings()
+        .execute()
+        .map_err(|e| i18n.app_error(&e))?;
+    if settings.mode(&account.id) == SyncMode::Stream && Client::connect().await.is_some() {
+        return Err(i18n.tr_args(
+            "cli-stream-already-mounted",
+            [("email", account.email.to_string().into())],
+        ));
+    }
+    let cache = nextgdrive_composition::stream::open_cache(i18n, settings.cache_limit)?;
+    let events = Box::new(|event: StreamEvent| match event {
+        StreamEvent::Log(line) => eprintln!("{line}"),
+        StreamEvent::ConflictCopy { name, .. } => eprintln!("{name}"),
+        StreamEvent::UploadFailed { name, message, .. } => eprintln!("{name}: {message}"),
+    });
     let mount = nextgdrive_composition::stream::mount(
         services,
         cache,
         account,
         &mountpoint,
         i18n.clone(),
-        log,
+        events,
     )?;
     println!(
         "{}",
