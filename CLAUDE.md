@@ -84,6 +84,8 @@ nextgdrive sync select <email> <folder-id> && nextgdrive sync run
 
 Two such environments syncing the same folder act as two computers, which is how upload, move, conflict and trash behavior is checked end to end.
 
+Trash (`use_cases/trash.rs`): `DriveTrash` lists only *explicitly* trashed items (a trashed folder is one entry; restoring it brings back its content) and restores them in place. Drive reports `trashedTime` only for shared-drive items, so `TrashEntry::trashed_at` is optional and My Drive items keep Drive's `recency` order.
+
 ### Google OAuth client
 
 The OAuth client (Google Cloud "Desktop app") is not in the repository; each developer uses their own. It is read from `NEXTGDRIVE_CLIENT_ID` + `NEXTGDRIVE_CLIENT_SECRET`, otherwise from the JSON downloaded from Google Cloud Console saved as `~/.config/nextgdrive/oauth-client.json`. The app requests the full `drive` scope (needed for two-way sync). While the Google Cloud app is in testing mode, only accounts listed as test users can sign in.
@@ -106,7 +108,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, account add|status|remove, config show|sync-root, sync run|folders|select|deselect
+cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, sync run|folders|select|deselect, trash list|restore
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 

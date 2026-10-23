@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use nextgdrive_domain::{Account, Drive, DriveItem, DriveItemId, StorageQuota};
+use nextgdrive_domain::{Account, Drive, DriveItem, DriveItemId, StorageQuota, TrashedItem};
 
 use std::time::SystemTime;
 
@@ -118,4 +118,18 @@ pub trait DriveService: Sync {
         id: &DriveItemId,
         parent: &DriveItemId,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+
+    /// Items the user trashed themselves; what was inside a trashed folder
+    /// is not listed separately (restoring the folder brings it back).
+    fn trashed_items(
+        &self,
+        token: &AccessToken,
+    ) -> impl Future<Output = Result<Vec<TrashedItem>, PortError>> + Send;
+
+    /// Takes an item (and everything inside it) out of the trash, back where it was.
+    fn restore(
+        &self,
+        token: &AccessToken,
+        id: &DriveItemId,
+    ) -> impl Future<Output = Result<DriveItem, PortError>> + Send;
 }

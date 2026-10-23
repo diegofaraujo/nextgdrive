@@ -8,7 +8,7 @@ use md5::{Digest, Md5};
 
 use nextgdrive_domain::{
     Account, AccountId, Capabilities, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind,
-    Settings, StorageQuota,
+    Settings, StorageQuota, TrashedItem,
 };
 
 use crate::ports::{
@@ -200,6 +200,8 @@ struct DriveState {
     version: u64,
     next_id: u64,
     trashed: Vec<DriveItemId>,
+    /// Trashed items, by the item the user trashed: everything hidden with it.
+    bin: BTreeMap<DriveItemId, (SystemTime, Vec<DriveItem>)>,
     removed_from_my_drive: Vec<DriveItemId>,
 }
 
@@ -222,8 +224,16 @@ impl DriveState {
         DriveItemId::new(format!("new-{}", self.next_id))
     }
 
-    /// Hides an item and everything inside it, as the trash does.
+    /// Hides an item and everything inside it, as the trash does, and keeps
+    /// them in the bin.
     fn hide(&mut self, id: &DriveItemId) {
+        let mut hidden = Vec::new();
+        self.collect(id, &mut hidden);
+        let at = self.tick();
+        self.bin.insert(id.clone(), (at, hidden));
+    }
+
+    fn collect(&mut self, id: &DriveItemId, hidden: &mut Vec<DriveItem>) {
         let children: Vec<DriveItemId> = self
             .items
             .values()
@@ -231,9 +241,9 @@ impl DriveState {
             .map(|i| i.id.clone())
             .collect();
         for child in children {
-            self.hide(&child);
+            self.collect(&child, hidden);
         }
-        self.items.remove(id);
+        hidden.extend(self.items.remove(id));
     }
 }
 
@@ -589,6 +599,37 @@ impl DriveService for FakeDrive {
         state.hide(id);
         state.trashed.push(id.clone());
         Ok(())
+    }
+
+    async fn trashed_items(&self, token: &AccessToken) -> Result<Vec<TrashedItem>, PortError> {
+        Self::check(token)?;
+        let state = self.state();
+        Ok(state
+            .bin
+            .iter()
+            .filter_map(|(id, (at, hidden))| {
+                let item = hidden.iter().find(|i| &i.id == id)?.clone();
+                Some(TrashedItem {
+                    item,
+                    trashed_at: Some(*at),
+                })
+            })
+            .collect())
+    }
+
+    async fn restore(&self, token: &AccessToken, id: &DriveItemId) -> Result<DriveItem, PortError> {
+        Self::check(token)?;
+        let mut state = self.state();
+        let (_, hidden) = state
+            .bin
+            .remove(id)
+            .ok_or_else(|| PortError::new("not in the trash"))?;
+        state.version += 1;
+        let restored = hidden.iter().find(|i| &i.id == id).cloned();
+        for item in hidden {
+            state.items.insert(item.id.clone(), item);
+        }
+        restored.ok_or_else(|| PortError::new("not in the trash"))
     }
 
     async fn remove_from_my_drive(

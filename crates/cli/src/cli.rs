@@ -13,6 +13,12 @@ pub enum Command {
     Account(AccountCommand),
     Config(ConfigCommand),
     Sync(SyncCommand),
+    Trash(TrashCommand),
+}
+
+pub enum TrashCommand {
+    List { email: String },
+    Restore { email: String, id: String },
 }
 
 pub enum AccountCommand {
@@ -190,6 +196,25 @@ fn command(i18n: &Localizer) -> clap::Command {
                                 .required(true),
                         ),
                 ),
+        )
+        .subcommand(
+            group("trash", "cli-trash-about")
+                .subcommand(
+                    clap::Command::new("list")
+                        .about(i18n.tr("cli-trash-list-about"))
+                        .arg(email("cli-account-email")),
+                )
+                .subcommand(
+                    clap::Command::new("restore")
+                        .about(i18n.tr("cli-trash-restore-about"))
+                        .arg(email("cli-account-email"))
+                        .arg(
+                            Arg::new("id")
+                                .value_name("ITEM_ID")
+                                .required(true)
+                                .help(i18n.tr("cli-trash-item-id")),
+                        ),
+                ),
         );
     localize_headings(root, i18n)
 }
@@ -276,6 +301,16 @@ fn from_matches(matches: &ArgMatches) -> Command {
             },
             _ => no_subcommand(),
         }),
+        Some(("trash", m)) => Command::Trash(match m.subcommand() {
+            Some(("list", m)) => TrashCommand::List {
+                email: string(m, "email"),
+            },
+            Some(("restore", m)) => TrashCommand::Restore {
+                email: string(m, "email"),
+                id: string(m, "id"),
+            },
+            _ => no_subcommand(),
+        }),
         _ => no_subcommand(),
     }
 }
@@ -341,6 +376,10 @@ mod tests {
                 remove_local: true,
                 ..
             })
+        ));
+        assert!(matches!(
+            parse_args(&["trash", "restore", "ana@x.com", "abc"]),
+            Command::Trash(TrashCommand::Restore { id, .. }) if id == "abc"
         ));
         assert!(matches!(
             parse_args(&["config", "sync-root", "/data"]),

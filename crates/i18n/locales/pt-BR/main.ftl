@@ -76,6 +76,12 @@ notify-problem-title = Não foi possível sincronizar { $email }
 notify-and-more = { $list } e mais { $count }
 notify-open = Abrir
 
+# strftime syntax: https://docs.rs/jiff/latest/jiff/fmt/strtime/
+date-format = %d/%m/%Y %H:%M
+trash-restored = “{ $name }” foi restaurado em { $location }.
+trash-restored-unknown = “{ $name }” foi restaurado.
+trash-location-unknown = uma pasta que você não acessa mais
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -134,6 +140,12 @@ cli-sync-requested = Pedido enviado ao Next GDrive em segundo plano para sincron
 cli-daemon-already-running = O Next GDrive já está rodando em segundo plano (o aplicativo na bandeja do sistema, ou outro "nextgdrive daemon").
 cli-sync-confirm-deletions = Enviar para a lixeira do Google Drive os arquivos apagados neste computador, mesmo que sejam muitos
 cli-sync-restore-deletions = Baixar de novo os arquivos apagados neste computador em vez de mandá-los para a lixeira do Google Drive
+cli-trash-about = Ver e restaurar itens da lixeira do Google Drive
+cli-trash-list-about = Listar o que está na lixeira (guardado por 30 dias)
+cli-trash-restore-about = Devolver um item para onde ele estava
+cli-trash-item-id = Id do item, como mostrado por "trash list"
+cli-trash-empty = A lixeira está vazia.
+cli-trash-entry = { $name }  (em { $location })  [{ $id }]
 
 ## GUI
 
@@ -221,6 +233,13 @@ gui-shared-drives = Drives compartilhados
 gui-shared-drives-description = Drives compartilhados com você pela sua equipe ou organização.
 gui-notifications = Notificações
 gui-notifications-subtitle = Avisar sobre conflitos e problemas na sincronização
+gui-trash = Lixeira do Google Drive
+gui-trash-subtitle = Restaurar itens apagados nos últimos 30 dias
+gui-trash-empty-title = A lixeira está vazia
+gui-trash-empty-description = Os itens apagados do Google Drive ficam aqui por 30 dias.
+gui-trash-restore = Restaurar
+gui-trash-entry = Em { $location }
+gui-trash-entry-dated = Em { $location } · apagado em { $date }
 
 ## Errors
 

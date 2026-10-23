@@ -195,6 +195,19 @@ impl Localizer {
         parts.join(", ")
     }
 
+    /// Local date and time, in the format the translation chooses (`date-format`,
+    /// strftime syntax).
+    pub fn date_time(&self, time: std::time::SystemTime) -> String {
+        let format = self.tr("date-format");
+        jiff::Timestamp::try_from(time)
+            .map(|t| {
+                t.to_zoned(jiff::tz::TimeZone::system())
+                    .strftime(&format)
+                    .to_string()
+            })
+            .unwrap_or_default()
+    }
+
     /// Short explanation of why an item was left alone.
     pub fn conflict_reason(&self, reason: ConflictReason) -> String {
         self.tr(match reason {
@@ -257,6 +270,17 @@ mod tests {
             pt.tr_args("error-account-not-found", [("email", "ana@x.com".into())]),
             "Nenhuma conta com o e-mail ana@x.com."
         );
+    }
+
+    #[test]
+    fn formats_dates_per_locale() {
+        let time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_761_000_000);
+        let pt = Localizer::new("pt-BR").date_time(time);
+        let en = Localizer::new("en-US").date_time(time);
+        assert_eq!(pt.len(), "20/10/2025 19:40".len(), "{pt}");
+        assert!(pt.contains("/2025"), "{pt}");
+        assert!(en.starts_with("2025-10-"), "{en}");
     }
 
     #[test]

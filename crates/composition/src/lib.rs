@@ -17,8 +17,8 @@ use nextgdrive_adapter_sqlite::SqliteSyncState;
 use nextgdrive_application::TokenProvider;
 use nextgdrive_application::background::BackgroundSync;
 use nextgdrive_application::use_cases::{
-    AddAccount, BrowseDrive, ChangeSelection, GetAccountStatus, GetSettings, ListAccounts,
-    RemoveAccount, SetNotifications, SetSyncRoot, SyncAccount,
+    AddAccount, BrowseDrive, ChangeSelection, DriveTrash, GetAccountStatus, GetSettings,
+    ListAccounts, RemoveAccount, SetNotifications, SetSyncRoot, SyncAccount,
 };
 use nextgdrive_domain::Settings;
 use nextgdrive_i18n::Localizer;
@@ -224,6 +224,20 @@ impl Services {
             &self.local.state,
             &self.local.accounts,
         )
+    }
+}
+
+impl Services {
+    pub fn drive_trash(
+        &self,
+    ) -> DriveTrash<
+        '_,
+        GoogleAuthenticator,
+        KeyringCredentialStore,
+        GoogleDrive,
+        TomlSettingsRepository,
+    > {
+        DriveTrash::new(&self.tokens, &self.drive, &self.local.settings)
     }
 }
 

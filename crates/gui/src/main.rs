@@ -11,6 +11,7 @@ mod ctx;
 mod folders_page;
 mod notifications;
 mod preferences;
+mod trash_page;
 mod tray;
 
 use std::cell::Cell;

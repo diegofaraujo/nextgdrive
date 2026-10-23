@@ -12,7 +12,7 @@ use nextgdrive_domain::Account;
 use nextgdrive_i18n::FluentValue;
 
 use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
-use crate::folders_page;
+use crate::{folders_page, trash_page};
 
 /// One account: storage, what is synced, and syncing on demand.
 struct AccountPage {
@@ -83,9 +83,20 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
     sync.add(&progress_row);
     sync.add(&open_row);
 
+    let trash_row = adw::ActionRow::builder()
+        .title(i18n.tr("gui-trash"))
+        .subtitle(i18n.tr("gui-trash-subtitle"))
+        .activatable(true)
+        .build();
+    trash_row.add_prefix(&gtk::Image::from_icon_name("user-trash-symbolic"));
+    trash_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let trash = adw::PreferencesGroup::new();
+    trash.add(&trash_row);
+
     let page = adw::PreferencesPage::new();
     page.add(&storage);
     page.add(&sync);
+    page.add(&trash);
     let report_group = adw::PreferencesGroup::new();
     page.add(&report_group);
 
@@ -122,6 +133,15 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
     state.open_row.connect_activated(move |_| {
         if let Some(state) = weak.upgrade() {
             state.open_folder();
+        }
+    });
+    // The row belongs to the page, so the closure may only hold a `Weak`.
+    let weak = Rc::downgrade(&state);
+    trash_row.connect_activated(move |_| {
+        if let Some(state) = weak.upgrade() {
+            state
+                .ctx
+                .push(&trash_page::build(&state.ctx, state.account.clone()));
         }
     });
     // Back from choosing folders: the selection may have changed.

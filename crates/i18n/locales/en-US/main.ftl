@@ -76,6 +76,12 @@ notify-problem-title = Could not sync { $email }
 notify-and-more = { $list } and { $count } more
 notify-open = Open
 
+# strftime syntax: https://docs.rs/jiff/latest/jiff/fmt/strtime/
+date-format = %Y-%m-%d %H:%M
+trash-restored = “{ $name }” restored to { $location }.
+trash-restored-unknown = “{ $name }” restored.
+trash-location-unknown = a folder you can no longer access
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -134,6 +140,12 @@ cli-sync-requested = Asked the Next GDrive running in the background to sync now
 cli-daemon-already-running = Next GDrive is already running in the background (the app in the system tray, or another "nextgdrive daemon").
 cli-sync-confirm-deletions = Move files deleted on this computer to the Google Drive trash, even if they are many
 cli-sync-restore-deletions = Download files deleted on this computer again instead of trashing them in Google Drive
+cli-trash-about = See and restore items in the Google Drive trash
+cli-trash-list-about = List what is in the trash (kept for 30 days)
+cli-trash-restore-about = Put an item back where it was
+cli-trash-item-id = Item id, as shown by "trash list"
+cli-trash-empty = The trash is empty.
+cli-trash-entry = { $name }  (in { $location })  [{ $id }]
 
 ## GUI
 
@@ -221,6 +233,13 @@ gui-shared-drives = Shared Drives
 gui-shared-drives-description = Drives shared with you by your team or organization.
 gui-notifications = Notifications
 gui-notifications-subtitle = Tell me about conflicts and sync problems
+gui-trash = Google Drive Trash
+gui-trash-subtitle = Restore items deleted in the last 30 days
+gui-trash-empty-title = Trash Is Empty
+gui-trash-empty-description = Items deleted from Google Drive stay here for 30 days.
+gui-trash-restore = Restore
+gui-trash-entry = In { $location }
+gui-trash-entry-dated = In { $location } · deleted { $date }
 
 ## Errors
 

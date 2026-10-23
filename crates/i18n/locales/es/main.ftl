@@ -76,6 +76,12 @@ notify-problem-title = No se pudo sincronizar { $email }
 notify-and-more = { $list } y { $count } más
 notify-open = Abrir
 
+# strftime syntax: https://docs.rs/jiff/latest/jiff/fmt/strtime/
+date-format = %d/%m/%Y %H:%M
+trash-restored = “{ $name }” se restauró en { $location }.
+trash-restored-unknown = “{ $name }” se restauró.
+trash-location-unknown = una carpeta a la que ya no tienes acceso
+
 ## CLI
 
 cli-about = Sincroniza tus cuentas de Google Drive con carpetas locales.
@@ -134,6 +140,12 @@ cli-sync-requested = Se pidió al Next GDrive en segundo plano que sincronice ah
 cli-daemon-already-running = Next GDrive ya se está ejecutando en segundo plano (la aplicación en la bandeja del sistema u otro "nextgdrive daemon").
 cli-sync-confirm-deletions = Enviar a la papelera de Google Drive los archivos eliminados en este equipo, aunque sean muchos
 cli-sync-restore-deletions = Volver a descargar los archivos eliminados en este equipo en lugar de enviarlos a la papelera de Google Drive
+cli-trash-about = Ver y restaurar elementos de la papelera de Google Drive
+cli-trash-list-about = Listar lo que hay en la papelera (se guarda 30 días)
+cli-trash-restore-about = Devolver un elemento a donde estaba
+cli-trash-item-id = Id del elemento, como lo muestra "trash list"
+cli-trash-empty = La papelera está vacía.
+cli-trash-entry = { $name }  (en { $location })  [{ $id }]
 
 ## GUI
 
@@ -221,6 +233,13 @@ gui-shared-drives = Unidades compartidas
 gui-shared-drives-description = Unidades que tu equipo u organización comparte contigo.
 gui-notifications = Notificaciones
 gui-notifications-subtitle = Avisarme de conflictos y problemas de sincronización
+gui-trash = Papelera de Google Drive
+gui-trash-subtitle = Restaurar elementos eliminados en los últimos 30 días
+gui-trash-empty-title = La papelera está vacía
+gui-trash-empty-description = Los elementos eliminados de Google Drive se quedan aquí 30 días.
+gui-trash-restore = Restaurar
+gui-trash-entry = En { $location }
+gui-trash-entry-dated = En { $location } · eliminado el { $date }
 
 ## Errors
 
