@@ -67,6 +67,9 @@ impl Default for InMemorySettings {
             shared_drives_folder: "Shared drives".into(),
             poll_interval_secs: Settings::DEFAULT_POLL_INTERVAL_SECS,
             notifications: true,
+            streamed: std::collections::BTreeSet::new(),
+            offline: BTreeMap::new(),
+            cache_limit: Settings::DEFAULT_CACHE_LIMIT,
             selections: BTreeMap::new(),
         }))
     }
@@ -543,6 +546,8 @@ impl DriveService for FakeDrive {
         if bytes.len() as u64 != size {
             return Err(PortError::new("size mismatch"));
         }
+        // A real upload takes time: let other tasks run meanwhile.
+        tokio::task::yield_now().await;
         let mut state = self.state();
         state.version += 1;
         let item = match target {

@@ -3,6 +3,17 @@ use std::path::PathBuf;
 
 use crate::{AccountId, DriveItemId};
 
+/// How an account's files are on this computer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Selected folders are copied to disk and kept in sync both ways.
+    #[default]
+    Mirror,
+    /// The whole Drive is shown in a virtual folder; files are downloaded
+    /// when opened, except those made available offline.
+    Stream,
+}
+
 /// User preferences for syncing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -20,10 +31,36 @@ pub struct Settings {
     /// Folders (or drive roots) chosen for download, per account. Everything
     /// inside a selected folder is synced. Accounts start with nothing selected.
     pub selections: BTreeMap<AccountId, BTreeSet<DriveItemId>>,
+    /// Accounts in [`SyncMode::Stream`]; the rest mirror.
+    pub streamed: BTreeSet<AccountId>,
+    /// Streamed files and folders kept on disk in full, per account.
+    pub offline: BTreeMap<AccountId, BTreeSet<DriveItemId>>,
+    /// Bytes the cache of streamed files may use (offline items not counted).
+    pub cache_limit: u64,
 }
 
 impl Settings {
     pub const DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
+    pub const DEFAULT_CACHE_LIMIT: u64 = 5 << 30;
+
+    pub fn mode(&self, account: &AccountId) -> SyncMode {
+        if self.streamed.contains(account) {
+            SyncMode::Stream
+        } else {
+            SyncMode::Mirror
+        }
+    }
+
+    pub fn set_mode(&mut self, account: &AccountId, mode: SyncMode) {
+        match mode {
+            SyncMode::Stream => self.streamed.insert(account.clone()),
+            SyncMode::Mirror => self.streamed.remove(account),
+        };
+    }
+
+    pub fn offline_items(&self, account: &AccountId) -> impl Iterator<Item = &DriveItemId> {
+        self.offline.get(account).into_iter().flatten()
+    }
 
     pub fn selection(&self, account: &AccountId) -> impl Iterator<Item = &DriveItemId> {
         self.selections.get(account).into_iter().flatten()

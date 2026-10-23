@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -8,7 +8,7 @@ use nextgdrive_application::AppError;
 use nextgdrive_application::use_cases::{
     Deletions, SkipReason, SyncOptions, SyncProgress, SyncReport,
 };
-use nextgdrive_domain::Account;
+use nextgdrive_domain::{Account, SyncMode};
 use nextgdrive_i18n::FluentValue;
 
 use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
@@ -26,6 +26,10 @@ struct AccountPage {
     progress_row: adw::ActionRow,
     progress_bar: gtk::ProgressBar,
     open_row: adw::ActionRow,
+    mode_row: adw::ComboRow,
+    /// Set while the page itself changes `mode_row`, so it is not taken as
+    /// the user switching modes.
+    setting_mode: Cell<bool>,
     /// Details of the last sync; rebuilt after each one.
     report_group: RefCell<adw::PreferencesGroup>,
     page: adw::PreferencesPage,
@@ -75,9 +79,15 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
         .activatable(true)
         .build();
     open_row.add_suffix(&gtk::Image::from_icon_name("folder-open-symbolic"));
+    let modes = gtk::StringList::new(&[&i18n.tr("gui-mode-mirror"), &i18n.tr("gui-mode-stream")]);
+    let mode_row = adw::ComboRow::builder()
+        .title(i18n.tr("gui-mode"))
+        .model(&modes)
+        .build();
     let sync = adw::PreferencesGroup::builder()
         .title(i18n.tr("gui-sync-group"))
         .build();
+    sync.add(&mode_row);
     sync.add(&folders_row);
     sync.add(&sync_row);
     sync.add(&progress_row);
@@ -112,6 +122,8 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
         progress_row,
         progress_bar,
         open_row,
+        mode_row,
+        setting_mode: Cell::new(false),
         report_group: RefCell::new(report_group),
         page,
     });
@@ -144,6 +156,19 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
                 .push(&trash_page::build(&state.ctx, state.account.clone()));
         }
     });
+    let weak = Rc::downgrade(&state);
+    state.mode_row.connect_selected_notify(move |row| {
+        let Some(state) = weak.upgrade() else { return };
+        if state.setting_mode.get() {
+            return;
+        }
+        let wanted = if row.selected() == 1 {
+            SyncMode::Stream
+        } else {
+            SyncMode::Mirror
+        };
+        state.confirm_mode(wanted);
+    });
     // Back from choosing folders: the selection may have changed.
     let weak = Rc::downgrade(&state);
     root.connect_shown(move |_| {
@@ -166,19 +191,106 @@ impl AccountPage {
 
     fn refresh_selection(&self) {
         let i18n = &self.ctx.i18n;
-        let count = match self.ctx.services.local.get_settings().execute() {
-            Ok(settings) => settings.selection(&self.account.id).count(),
+        let settings = match self.ctx.services.local.get_settings().execute() {
+            Ok(settings) => settings,
             Err(e) => {
                 self.folders_row.set_subtitle(&i18n.app_error(&e));
                 return;
             }
         };
+        let streaming = settings.mode(&self.account.id) == SyncMode::Stream;
+        self.setting_mode.set(true);
+        self.mode_row.set_selected(u32::from(streaming));
+        self.setting_mode.set(false);
+        self.mode_row.set_subtitle(&i18n.tr(if streaming {
+            "gui-mode-stream-subtitle"
+        } else {
+            "gui-mode-mirror-subtitle"
+        }));
+        // Streaming shows the whole Drive: nothing to choose or sync by hand.
+        for row in [&self.folders_row, &self.sync_row] {
+            row.set_visible(!streaming);
+        }
+        let count = settings.selection(&self.account.id).count();
         self.folders_row.set_subtitle(
             &i18n.tr_args("gui-folders-count", [("count", FluentValue::from(count))]),
         );
         self.sync_button.set_sensitive(count > 0);
         self.open_row
             .set_sensitive(self.account_dir().is_some_and(|dir| dir.is_dir()));
+    }
+
+    /// Explains what switching does to the account's folder, then switches.
+    fn confirm_mode(self: &Rc<Self>, mode: SyncMode) {
+        let i18n = &self.ctx.i18n;
+        let (title, body, action) = match mode {
+            SyncMode::Stream => (
+                "gui-mode-stream-title",
+                "gui-mode-stream-body",
+                "gui-mode-stream-action",
+            ),
+            SyncMode::Mirror => (
+                "gui-mode-mirror-title",
+                "gui-mode-mirror-body",
+                "gui-mode-mirror-action",
+            ),
+        };
+        let dialog = adw::AlertDialog::new(Some(&i18n.tr(title)), Some(&i18n.tr(body)));
+        dialog.add_responses(&[
+            ("cancel", &i18n.tr("gui-cancel")),
+            ("switch", &i18n.tr(action)),
+        ]);
+        dialog.set_response_appearance("switch", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let Some(state) = weak.upgrade() else { return };
+            if response == "switch" {
+                state.switch_mode(mode);
+            } else {
+                state.refresh_selection();
+            }
+        });
+        dialog.present(self.ctx.window().as_ref());
+    }
+
+    fn switch_mode(self: &Rc<Self>, mode: SyncMode) {
+        self.mode_row.set_sensitive(false);
+        let services = self.ctx.services.clone();
+        let (account, i18n) = (self.account.clone(), self.ctx.i18n.clone());
+        let weak = Rc::downgrade(self);
+        spawn(
+            async move {
+                let staging = nextgdrive_composition::stream::open_staging(&i18n, &account)?;
+                let change = services
+                    .local
+                    .set_sync_mode(&staging)
+                    .execute(&account, mode, &i18n.tr("kept-files-label"))
+                    .map_err(|e| i18n.app_error(&e))?;
+                // The background process mounts or unmounts on its next round.
+                if let Some(client) = nextgdrive_adapter_dbus::Client::connect().await {
+                    let _ = client.sync_now().await;
+                }
+                Ok::<_, String>(change)
+            },
+            move |result| {
+                let Some(state) = weak.upgrade() else { return };
+                state.mode_row.set_sensitive(true);
+                let i18n = &state.ctx.i18n;
+                match result {
+                    Ok(change) => match &change.kept_folder {
+                        Some(kept) => state.ctx.toast(&i18n.tr_args(
+                            "mode-kept-files",
+                            [("path", kept.display().to_string().into())],
+                        )),
+                        None => state.ctx.toast(&i18n.tr("gui-mode-switched")),
+                    },
+                    Err(message) => state.ctx.toast(&message),
+                }
+                state.refresh_selection();
+            },
+        );
     }
 
     fn load_quota(self: &Rc<Self>) {

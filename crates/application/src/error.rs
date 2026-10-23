@@ -14,6 +14,9 @@ pub enum AppError {
     MissingCredentials(Email),
     #[error("{0} is already being synced")]
     SyncInProgress(Email),
+    /// Streamed files written here are not all in Drive yet.
+    #[error("{0} streamed files are not uploaded yet")]
+    PendingUploads(usize),
     /// A synced folder vanished as a whole (e.g. an unmounted disk). Syncing
     /// would send everything in it to the trash, so nothing is done.
     #[error("synced folder not found: {0}")]

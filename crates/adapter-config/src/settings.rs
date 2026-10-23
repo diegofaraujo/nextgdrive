@@ -21,6 +21,7 @@ struct SettingsFile {
     shared_drives_folder: Option<String>,
     poll_interval_secs: Option<u64>,
     notifications: Option<bool>,
+    cache_limit_bytes: Option<u64>,
     /// Keyed by account id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     accounts: BTreeMap<String, AccountSettings>,
@@ -28,8 +29,19 @@ struct SettingsFile {
 
 #[derive(Default, Serialize, Deserialize)]
 struct AccountSettings {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     selected_folders: BTreeSet<String>,
+    /// "stream", or absent for mirroring.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    offline: BTreeSet<String>,
+}
+
+const STREAM: &str = "stream";
+
+fn ids(values: &BTreeSet<String>) -> BTreeSet<DriveItemId> {
+    values.iter().cloned().map(DriveItemId::new).collect()
 }
 
 impl TomlSettingsRepository {
@@ -74,18 +86,24 @@ impl SettingsRepository for TomlSettingsRepository {
                 .filter(|secs| *secs > 0)
                 .unwrap_or(defaults.poll_interval_secs),
             notifications: file.notifications.unwrap_or(defaults.notifications),
+            cache_limit: file.cache_limit_bytes.unwrap_or(defaults.cache_limit),
             selections: file
                 .accounts
-                .into_iter()
+                .iter()
                 .filter(|(_, a)| !a.selected_folders.is_empty())
-                .map(|(id, a)| {
-                    let folders = a
-                        .selected_folders
-                        .into_iter()
-                        .map(DriveItemId::new)
-                        .collect();
-                    (AccountId::new(id), folders)
-                })
+                .map(|(id, a)| (AccountId::new(id.clone()), ids(&a.selected_folders)))
+                .collect(),
+            streamed: file
+                .accounts
+                .iter()
+                .filter(|(_, a)| a.mode.as_deref() == Some(STREAM))
+                .map(|(id, _)| AccountId::new(id.clone()))
+                .collect(),
+            offline: file
+                .accounts
+                .iter()
+                .filter(|(_, a)| !a.offline.is_empty())
+                .map(|(id, a)| (AccountId::new(id.clone()), ids(&a.offline)))
                 .collect(),
         })
     }
@@ -99,15 +117,24 @@ impl SettingsRepository for TomlSettingsRepository {
             shared_drives_folder: Some(settings.shared_drives_folder.clone()),
             poll_interval_secs: Some(settings.poll_interval_secs),
             notifications: Some(settings.notifications),
-            accounts: settings
-                .selections
-                .iter()
-                .map(|(id, folders)| {
-                    let selected_folders = folders.iter().map(ToString::to_string).collect();
-                    (id.to_string(), AccountSettings { selected_folders })
-                })
-                .collect(),
+            cache_limit_bytes: Some(settings.cache_limit),
+            accounts: BTreeMap::new(),
         };
+        let mut file = file;
+        let strings =
+            |items: &BTreeSet<DriveItemId>| items.iter().map(ToString::to_string).collect();
+        for (id, folders) in &settings.selections {
+            file.accounts
+                .entry(id.to_string())
+                .or_default()
+                .selected_folders = strings(folders);
+        }
+        for id in &settings.streamed {
+            file.accounts.entry(id.to_string()).or_default().mode = Some(STREAM.into());
+        }
+        for (id, items) in &settings.offline {
+            file.accounts.entry(id.to_string()).or_default().offline = strings(items);
+        }
         let text = toml::to_string(&file).map_err(|e| self.error(e))?;
         crate::write_atomically(&self.path, &text).map_err(|e| self.error(e))
     }
@@ -124,6 +151,9 @@ mod tests {
             shared_drives_folder: "Drives compartilhados".into(),
             poll_interval_secs: 60,
             notifications: true,
+            streamed: BTreeSet::new(),
+            offline: BTreeMap::new(),
+            cache_limit: Settings::DEFAULT_CACHE_LIMIT,
             selections: BTreeMap::new(),
         }
     }
@@ -142,6 +172,11 @@ mod tests {
         let mut settings = defaults();
         settings.sync_root = "/data/drive".into();
         settings.select(&AccountId::new("1"), DriveItemId::new("folder-a"));
+        settings.set_mode(&AccountId::new("2"), nextgdrive_domain::SyncMode::Stream);
+        settings
+            .offline
+            .insert(AccountId::new("2"), [DriveItemId::new("doc")].into());
+        settings.cache_limit = 123;
         TomlSettingsRepository::new(&path, defaults())
             .save(&settings)
             .unwrap();

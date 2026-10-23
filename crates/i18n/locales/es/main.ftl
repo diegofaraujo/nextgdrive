@@ -73,6 +73,8 @@ notify-attention-title = { $count ->
    *[other] { $count } elementos necesitan atención
 }
 notify-problem-title = No se pudo sincronizar { $email }
+notify-mount-failed-title = No se pudo abrir la carpeta de Google Drive de { $email }
+notify-upload-failed-title = Aún no se pudo subir «{ $name }»
 notify-and-more = { $list } y { $count } más
 notify-open = Abrir
 
@@ -86,6 +88,9 @@ stream-pending = { $count ->
     [one] 1 archivo guardado antes aún no estaba en Google Drive; subiéndolo.
    *[other] { $count } archivos guardados antes aún no estaban en Google Drive; subiéndolos.
 }
+
+kept-files-label = archivos conservados
+mode-kept-files = Los archivos que solo existían en este equipo se movieron a { $path }.
 
 ## CLI
 
@@ -155,6 +160,11 @@ cli-stream-about = Mostrar todo el Google Drive de una cuenta en una carpeta, de
 cli-stream-mountpoint = Carpeta donde mostrarlo (se crea si no existe; debe estar vacía)
 cli-stream-mounted = Google Drive está disponible en { $path }. Pulsa Ctrl+C para detener.
 cli-stream-unmounted = Carpeta de Google Drive cerrada.
+cli-config-mode-about = Reflejar las carpetas seleccionadas, o transmitir todo el Drive (archivos descargados al abrirlos)
+cli-config-mode-value = "mirror" (reflejar) o "stream" (transmitir)
+cli-mode-stream = { $email } ahora transmite todo su Google Drive en su carpeta.
+cli-mode-mirror = { $email } ahora refleja las carpetas seleccionadas. Elígelas con "nextgdrive sync select".
+cli-stream-already-mounted = { $email } ya se transmite en su carpeta desde el Next GDrive en segundo plano.
 
 ## GUI
 
@@ -249,6 +259,18 @@ gui-trash-empty-description = Los elementos eliminados de Google Drive se quedan
 gui-trash-restore = Restaurar
 gui-trash-entry = En { $location }
 gui-trash-entry-dated = En { $location } · eliminado el { $date }
+gui-mode = Modo
+gui-mode-mirror = Reflejar carpetas seleccionadas
+gui-mode-stream = Transmitir todo el Drive
+gui-mode-mirror-subtitle = Las carpetas elegidas se copian a este equipo y funcionan sin conexión
+gui-mode-stream-subtitle = Se muestra todo; los archivos se descargan al abrirlos
+gui-mode-stream-title = ¿Transmitir todo el Drive?
+gui-mode-stream-body = La carpeta de la cuenta mostrará todo tu Google Drive, descargando los archivos solo cuando se abran. Las copias descargadas se eliminan de este equipo (siguen en Google Drive y vuelven a aparecer en la carpeta). Los archivos que solo existen en este equipo se mueven a una carpeta aparte, nunca se eliminan.
+gui-mode-stream-action = Transmitir
+gui-mode-mirror-title = ¿Reflejar carpetas seleccionadas?
+gui-mode-mirror-body = La carpeta de la cuenta guardará copias de las carpetas que elijas, sincronizadas y disponibles sin conexión. Elígelas en Carpetas para sincronizar.
+gui-mode-mirror-action = Reflejar
+gui-mode-switched = Modo cambiado.
 
 ## Errors
 
@@ -270,3 +292,8 @@ error-local-folder-missing = No se encuentra la carpeta sincronizada { $path } (
 error-mass-deletion = Se eliminaron { $count } archivos en este equipo. Confirma antes de que vayan a la papelera de Google Drive, o restáuralos.
 error-folder-exists = Ya existe una carpeta en { $path }. Elige otra ubicación, o mueve o elimina esa carpeta primero.
 error-mount = No se pudo mostrar Google Drive en { $path }: { $details }
+error-pending-uploads = { $count ->
+    [one] 1 archivo guardado en la carpeta transmitida aún no está en Google Drive. Vuelve a intentarlo cuando se haya subido.
+   *[other] { $count } archivos guardados en la carpeta transmitida aún no están en Google Drive. Vuelve a intentarlo cuando se hayan subido.
+}
+error-mount-not-empty = La carpeta { $path } no está vacía, así que el Google Drive transmitido no se puede mostrar allí. Mueve su contenido a otro lugar.

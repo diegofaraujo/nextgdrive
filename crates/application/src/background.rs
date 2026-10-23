@@ -98,6 +98,10 @@ where
     ) -> Result<(), AppError> {
         let settings = self.settings.load().map_err(AppError::Storage)?;
         for account in self.accounts.list().map_err(AppError::Storage)? {
+            // Streamed accounts are kept up to date by their mount.
+            if settings.mode(&account.id) == nextgdrive_domain::SyncMode::Stream {
+                continue;
+            }
             let selection: BTreeSet<_> = settings.selection(&account.id).cloned().collect();
             if selection.is_empty() {
                 continue;
@@ -348,6 +352,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(*events.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn skips_streamed_accounts() {
+        let w = world();
+        w.settings
+            .update(|s| s.set_mode(&w.ana.id, nextgdrive_domain::SyncMode::Stream));
+        let bg = background(&w);
+
+        assert!(tick(&bg, true).await.is_empty());
     }
 
     #[tokio::test]

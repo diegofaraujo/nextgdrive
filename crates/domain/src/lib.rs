@@ -14,4 +14,4 @@ pub use account::{Account, AccountId, Email};
 pub use drive::{Capabilities, Drive, DriveItem, DriveItemId, DriveKind, ItemKind, TrashedItem};
 pub use error::DomainError;
 pub use quota::StorageQuota;
-pub use settings::Settings;
+pub use settings::{Settings, SyncMode};

@@ -538,6 +538,18 @@ where
             .upload(&token, target, len, file.modified, &mut reader)
             .await
             .map_err(AppError::Drive)?;
+        // Deleted while uploading: what was just created must not stay.
+        // (For an edit of an existing file, deleting already trashed it.)
+        let deleted = !self.state.table().staged.contains_key(key);
+        if deleted {
+            if new_file.is_some() {
+                self.drive
+                    .trash(&token, &item.id)
+                    .await
+                    .map_err(AppError::Drive)?;
+            }
+            return Ok(UploadOutcome::default());
+        }
         let outcome = UploadOutcome {
             conflict_copy: current.as_ref().and(new_file.map(|(_, name)| name)),
         };
