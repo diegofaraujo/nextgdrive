@@ -177,6 +177,9 @@ struct Planner {
     cleanup: Vec<(PathBuf, Op)>,
     /// Local paths already accounted for.
     claimed: HashSet<PathBuf>,
+    /// Local copies removed before anything is downloaded: a new Drive item
+    /// with the same name may take their place in the same sync.
+    freed: HashSet<PathBuf>,
     deletions: usize,
 }
 
@@ -242,6 +245,7 @@ impl Planner {
                             id: id(),
                             path: b.path.clone(),
                         });
+                        self.free(&b.path);
                     }
                     return;
                 };
@@ -337,7 +341,19 @@ impl Planner {
         }
     }
 
+    /// The local copy at `path` is removed in the delete phase, which runs
+    /// before any download.
+    fn free(&mut self, path: &Path) {
+        self.claimed.remove(path);
+        self.freed.insert(path.to_owned());
+    }
+
     fn new_remote(&mut self, id: &DriveItemId, w: &Wanted, local: Option<&LocalMetadata>) {
+        let local = if self.freed.contains(&w.path) {
+            None
+        } else {
+            local
+        };
         let taken = self.claimed.contains(&w.path);
         self.claimed.insert(w.path.clone());
         let folder = w.item.kind == ItemKind::Folder;

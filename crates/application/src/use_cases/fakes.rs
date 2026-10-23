@@ -15,7 +15,7 @@ use crate::ports::{
     AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, BlockCache,
     BlockKey, Changes, CredentialStore, DirEntry, DriveAccountInfo, DriveService, FileReader,
     FileWriter, LocalFileSystem, LocalMetadata, PendingAuthorization, PortError, RefreshToken,
-    SettingsRepository, SyncStateStore, SyncedItem, UploadTarget,
+    SettingsRepository, StagedFile, StagingArea, SyncStateStore, SyncedItem, UploadTarget,
 };
 
 #[derive(Default)]
@@ -187,6 +187,8 @@ pub struct FakeDrive {
     pub changes_calls: AtomicUsize,
     /// Calls to `download_range`, to check what reads actually fetch.
     pub range_calls: AtomicUsize,
+    /// Makes every upload fail, as when offline.
+    pub fail_uploads: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -285,6 +287,7 @@ impl FakeDrive {
             inner: Mutex::new(state),
             changes_calls: AtomicUsize::new(0),
             range_calls: AtomicUsize::new(0),
+            fail_uploads: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -525,6 +528,9 @@ impl DriveService for FakeDrive {
         content: &mut R,
     ) -> Result<DriveItem, PortError> {
         Self::check(token)?;
+        if self.fail_uploads.load(Ordering::Relaxed) {
+            return Err(PortError::new("offline"));
+        }
         let mut bytes = Vec::new();
         let mut buf = [0; 4];
         loop {
@@ -1038,6 +1044,89 @@ impl BlockCache for InMemoryBlocks {
 
     fn put(&self, key: &BlockKey, data: &[u8]) -> Result<(), PortError> {
         self.0.lock().unwrap().insert(key.clone(), data.to_vec());
+        Ok(())
+    }
+}
+
+/// Staging area in memory.
+#[derive(Default)]
+pub struct InMemoryStaging(Mutex<HashMap<String, (StagedFile, Vec<u8>)>>);
+
+impl InMemoryStaging {
+    fn with<T>(
+        &self,
+        key: &str,
+        f: impl FnOnce(&mut (StagedFile, Vec<u8>)) -> T,
+    ) -> Result<T, PortError> {
+        let mut files = self.0.lock().unwrap();
+        files
+            .get_mut(key)
+            .map(f)
+            .ok_or_else(|| PortError::new("not staged"))
+    }
+
+    pub fn count(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+}
+
+impl StagingArea for InMemoryStaging {
+    fn create(&self, file: &StagedFile) -> Result<(), PortError> {
+        self.0
+            .lock()
+            .unwrap()
+            .insert(file.key.clone(), (file.clone(), Vec::new()));
+        Ok(())
+    }
+
+    fn update(&self, file: &StagedFile) -> Result<(), PortError> {
+        self.with(&file.key, |entry| entry.0 = file.clone())
+    }
+
+    fn list(&self) -> Result<Vec<StagedFile>, PortError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(f, _)| f.clone())
+            .collect())
+    }
+
+    fn len(&self, key: &str) -> Result<u64, PortError> {
+        self.with(key, |entry| entry.1.len() as u64)
+    }
+
+    fn read_at(&self, key: &str, offset: u64, size: usize) -> Result<Vec<u8>, PortError> {
+        self.with(key, |entry| {
+            let start = usize::try_from(offset)
+                .unwrap_or(usize::MAX)
+                .min(entry.1.len());
+            let end = start.saturating_add(size).min(entry.1.len());
+            entry.1[start..end].to_vec()
+        })
+    }
+
+    fn write_at(&self, key: &str, offset: u64, data: &[u8]) -> Result<(), PortError> {
+        self.with(key, |entry| {
+            let start = usize::try_from(offset).unwrap_or(usize::MAX);
+            if entry.1.len() < start + data.len() {
+                entry.1.resize(start + data.len(), 0);
+            }
+            entry.1[start..start + data.len()].copy_from_slice(data);
+        })
+    }
+
+    fn set_len(&self, key: &str, len: u64) -> Result<(), PortError> {
+        self.with(key, |entry| {
+            entry
+                .1
+                .resize(usize::try_from(len).unwrap_or(usize::MAX), 0)
+        })
+    }
+
+    fn remove(&self, key: &str) -> Result<(), PortError> {
+        self.0.lock().unwrap().remove(key);
         Ok(())
     }
 }

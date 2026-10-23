@@ -82,6 +82,11 @@ trash-restored = “{ $name }” foi restaurado em { $location }.
 trash-restored-unknown = “{ $name }” foi restaurado.
 trash-location-unknown = uma pasta que você não acessa mais
 
+stream-pending = { $count ->
+    [one] 1 arquivo gravado antes ainda não estava no Google Drive; enviando.
+   *[other] { $count } arquivos gravados antes ainda não estavam no Google Drive; enviando.
+}
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -146,7 +151,7 @@ cli-trash-restore-about = Devolver um item para onde ele estava
 cli-trash-item-id = Id do item, como mostrado por "trash list"
 cli-trash-empty = A lixeira está vazia.
 cli-trash-entry = { $name }  (em { $location })  [{ $id }]
-cli-stream-about = Mostrar todo o Google Drive de uma conta numa pasta, baixando os arquivos só quando forem abertos (somente leitura por enquanto)
+cli-stream-about = Mostrar todo o Google Drive de uma conta numa pasta, baixando os arquivos só quando forem abertos
 cli-stream-mountpoint = Pasta onde mostrar (criada se não existir; precisa estar vazia)
 cli-stream-mounted = O Google Drive está disponível em { $path }. Pressione Ctrl+C para parar.
 cli-stream-unmounted = Pasta do Google Drive fechada.

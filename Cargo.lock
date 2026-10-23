@@ -1800,6 +1800,8 @@ dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
  "notify",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
