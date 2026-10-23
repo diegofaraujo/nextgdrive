@@ -1,5 +1,6 @@
 mod account_repository;
 mod auth;
+mod block_cache;
 mod credentials;
 mod drive;
 mod error;
@@ -11,6 +12,7 @@ pub use account_repository::AccountRepository;
 pub use auth::{
     AccessGrant, AccessToken, Authenticator, AuthorizedTokens, PendingAuthorization, RefreshToken,
 };
+pub use block_cache::{BlockCache, BlockKey};
 pub use credentials::CredentialStore;
 pub use drive::{Changes, DriveAccountInfo, DriveService, UploadTarget};
 pub use error::PortError;

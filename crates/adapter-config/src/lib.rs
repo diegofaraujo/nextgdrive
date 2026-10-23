@@ -16,6 +16,11 @@ pub fn config_dir() -> Option<PathBuf> {
     xdg::BaseDirectories::with_prefix(APP_DIR).get_config_home()
 }
 
+/// `$XDG_CACHE_HOME/nextgdrive`, usually `~/.cache/nextgdrive`.
+pub fn cache_dir() -> Option<PathBuf> {
+    xdg::BaseDirectories::with_prefix(APP_DIR).get_cache_home()
+}
+
 /// `$XDG_DATA_HOME/nextgdrive`, usually `~/.local/share/nextgdrive`.
 pub fn data_dir() -> Option<PathBuf> {
     xdg::BaseDirectories::with_prefix(APP_DIR).get_data_home()

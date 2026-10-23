@@ -37,6 +37,8 @@ Clean Architecture + Hexagonal (Ports & Adapters) in a Cargo workspace with one 
 | `adapter-google` | `Authenticator` (OAuth 2.0 for installed apps: PKCE + loopback server on `127.0.0.1:<random port>`) and `DriveService` (Drive API v3). | `domain`, `application` |
 | `adapter-keyring` | `CredentialStore` in the Secret Service keyring via `oo7`. Only refresh tokens are stored, never on disk. | `domain`, `application` |
 | `i18n` | Fluent translations shared by GUI and CLI; maps `AppError`/`DomainError` to messages; formats sizes and quotas. | `domain`, `application` |
+| `adapter-cache` | `BlockCache` on disk under XDG cache (`~/.cache/nextgdrive/blocks/<file id>/<version>/<index>`); evicts least recently used blocks past its limit. | `domain`, `application` |
+| `adapter-fuse` | FUSE filesystem (`fuser`, pure Rust: needs only `fusermount3`, not libfuse) for streaming; defines the `StreamBackend` it calls, answers each request in a Tokio task. Read-only for now. | `domain`, `application` |
 | `adapter-dbus` | Session-bus service `io.github.diegofaraujo.NextGDrive.Sync` (zbus) exposed by whichever process runs background sync, and the `Client` the CLI uses. Owning the bus name means "I run background sync". | — |
 | `composition` | Shared composition root: builds the concrete adapters (`Services`), localizes setup errors, and `host::SyncHost` (background-sync loop with status, sync-now/pause/resume, served on D-Bus). | everything except front-ends |
 | `cli` | Binary `nextgdrive` (clap). | `composition`, inner layers |
@@ -86,6 +88,8 @@ Two such environments syncing the same folder act as two computers, which is how
 
 Trash (`use_cases/trash.rs`): `DriveTrash` lists only *explicitly* trashed items (a trashed folder is one entry; restoring it brings back its content) and restores them in place. Drive reports `trashedTime` only for shared-drive items, so `TrashEntry::trashed_at` is optional and My Drive items keep Drive's `recency` order.
 
+Streaming (`application/src/streaming.rs`): an account's whole Drive as a virtual tree, content fetched only when read. `StreamState` (one per mount) keeps a node table with ids stable across relistings (keyed by parent + Drive id), folder listings cached for `listing_ttl`, and where each file's last read ended; `StreamingDrive` answers attr/list/lookup/read. Content is fetched in `block_size` blocks keyed by Drive's MD5 (so a new version never gets stale blocks); a sequential read fetches up to `readahead_blocks` in one ranged request, a random one (thumbnailers) just one block. Try it with `nextgdrive stream <email> <folder>` (foreground, Ctrl+C unmounts).
+
 ### Google OAuth client
 
 The OAuth client (Google Cloud "Desktop app") is not in the repository; each developer uses their own. It is read from `NEXTGDRIVE_CLIENT_ID` + `NEXTGDRIVE_CLIENT_SECRET`, otherwise from the JSON downloaded from Google Cloud Console saved as `~/.config/nextgdrive/oauth-client.json`. The app requests the full `drive` scope (needed for two-way sync). While the Google Cloud app is in testing mode, only accounts listed as test users can sign in.
@@ -108,7 +112,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, sync run|folders|select|deselect, trash list|restore
+cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, sync run|folders|select|deselect, trash list|restore, stream
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 
