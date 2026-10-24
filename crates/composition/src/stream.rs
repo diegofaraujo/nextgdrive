@@ -275,7 +275,7 @@ pub fn open_staging(i18n: &Localizer, account: &Account) -> Result<DiskStaging, 
 
 /// After a crash the mount point is left dead ("Transport endpoint is not
 /// connected") and cannot be mounted again until it is unmounted.
-fn clear_stale_mount(mountpoint: &Path) {
+pub(crate) fn clear_stale_mount(mountpoint: &Path) {
     let dead = matches!(std::fs::metadata(mountpoint), Err(e) if e.raw_os_error() == Some(107)); // ENOTCONN
     if dead {
         let _ = std::process::Command::new("fusermount3")
