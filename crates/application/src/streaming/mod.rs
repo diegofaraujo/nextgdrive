@@ -5,6 +5,7 @@
 //! translates kernel requests into these calls. Writes (see `write.rs`) go
 //! to a staging area first and are uploaded when the file is closed.
 
+mod trash_dir;
 mod write;
 
 #[cfg(test)]
@@ -43,6 +44,8 @@ pub struct NodeAttr {
     pub kind: NodeKind,
     pub size: u64,
     pub modified: SystemTime,
+    /// Only the owner may enter it (the desktop trash requires that).
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +120,23 @@ enum Content {
     },
     /// Content held in the staging area (being edited, or not uploaded yet).
     Staged(String),
+    /// A folder that exists only on this computer: the desktop trash
+    /// (`.Trash-<uid>` with `files/` and `info/`), see `trash_dir.rs`.
+    Local(LocalDir),
+    /// A desktop trash description (`info/*.trashinfo`), kept in memory.
+    TrashInfo(Vec<u8>),
+    /// Something moved to the desktop trash, i.e. to the Drive trash.
+    Trashed {
+        id: DriveItemId,
+        dir: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalDir {
+    Trash,
+    TrashFiles,
+    TrashInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -159,16 +179,22 @@ struct Table {
     staged: HashMap<String, Staging>,
     /// Drive files being edited → their staging key.
     staged_by_drive: HashMap<DriveItemId, String>,
+    /// Children that exist only on this computer, per folder.
+    local_children: HashMap<NodeId, Vec<(String, NodeId)>>,
     next: NodeId,
 }
 
 impl Table {
     fn attr(&self, id: NodeId) -> Option<NodeAttr> {
         let node = self.nodes.get(&id)?;
+        let private = matches!(node.content, Content::Local(_));
         let (kind, size, modified) = match &node.content {
-            Content::Root | Content::SharedDrives | Content::Folder(_) => {
+            Content::Root | Content::SharedDrives | Content::Folder(_) | Content::Local(_) => {
                 (NodeKind::Dir, 0, node.modified)
             }
+            Content::TrashInfo(bytes) => (NodeKind::File, bytes.len() as u64, node.modified),
+            Content::Trashed { dir: true, .. } => (NodeKind::Dir, 0, node.modified),
+            Content::Trashed { dir: false, .. } => (NodeKind::File, 0, node.modified),
             Content::File { size, .. } => (NodeKind::File, *size, node.modified),
             Content::Shortcut { bytes, .. } => (NodeKind::File, bytes.len() as u64, node.modified),
             Content::Staged(key) => {
@@ -181,6 +207,7 @@ impl Table {
             kind,
             size,
             modified,
+            private,
         })
     }
 
@@ -298,7 +325,10 @@ where
     }
 
     pub async fn list(&self, dir: NodeId) -> Result<Vec<Entry>, StreamError> {
-        let fresh = {
+        let local_dir = matches!(self.state.table().content(dir), Some(Content::Local(_)));
+        let fresh = if local_dir {
+            Some(Vec::new())
+        } else {
             let table = self.state.table();
             table
                 .listings
@@ -311,8 +341,10 @@ where
             None => self.fetch_listing(dir).await?,
         };
         let table = self.state.table();
+        let local = table.local_children.get(&dir).cloned().unwrap_or_default();
         Ok(children
             .into_iter()
+            .chain(local)
             .filter_map(|(name, id)| {
                 Some(Entry {
                     name,
@@ -337,6 +369,15 @@ where
                 let end = start.saturating_add(size as usize).min(bytes.len());
                 Ok(bytes[start..end].to_vec())
             }
+            Some(Content::TrashInfo(bytes)) => {
+                let start = usize::try_from(offset)
+                    .unwrap_or(usize::MAX)
+                    .min(bytes.len());
+                let end = start.saturating_add(size as usize).min(bytes.len());
+                Ok(bytes[start..end].to_vec())
+            }
+            // Its content is in the Drive trash.
+            Some(Content::Trashed { .. }) => Ok(Vec::new()),
             Some(Content::Staged(key)) => Ok(self
                 .staging
                 .read_at(&key, offset, size as usize)

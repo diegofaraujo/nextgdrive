@@ -93,6 +93,8 @@ struct Owner {
 impl Owner {
     fn file_attr(self, attr: &NodeAttr) -> FileAttr {
         let (kind, perm, nlink) = match attr.kind {
+            // The desktop trash must be private to its owner.
+            NodeKind::Dir if attr.private => (FileType::Directory, 0o700, 2),
             NodeKind::Dir => (FileType::Directory, 0o755, 2),
             NodeKind::File => (FileType::RegularFile, 0o644, 1),
         };
