@@ -24,6 +24,32 @@
       The app runs in the background with a tray icon and notifications, and everything it does is also available from the command line.
     </p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Storage, sync mode and status of an account</caption>
+      <caption xml:lang="pt_BR">Armazenamento, modo de sincronização e status de uma conta</caption>
+      <caption xml:lang="es">Almacenamiento, modo de sincronización y estado de una cuenta</caption>
+      <image>https://raw.githubusercontent.com/diegofaraujo/nextgdrive/v0.1.1/docs/screenshots/account.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Linked Google accounts and their storage</caption>
+      <caption xml:lang="pt_BR">Contas Google vinculadas e seu armazenamento</caption>
+      <caption xml:lang="es">Cuentas de Google vinculadas y su almacenamiento</caption>
+      <image>https://raw.githubusercontent.com/diegofaraujo/nextgdrive/v0.1.1/docs/screenshots/accounts.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Choosing the folders to mirror</caption>
+      <caption xml:lang="pt_BR">Escolhendo as pastas para espelhar</caption>
+      <caption xml:lang="es">Eligiendo las carpetas para reflejar</caption>
+      <image>https://raw.githubusercontent.com/diegofaraujo/nextgdrive/v0.1.1/docs/screenshots/folders.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Preferences: sync folder, start at login and the cache of streamed files</caption>
+      <caption xml:lang="pt_BR">Preferências: pasta de sincronização, início com a sessão e cache dos arquivos transmitidos</caption>
+      <caption xml:lang="es">Preferencias: carpeta de sincronización, inicio con la sesión y caché de los archivos transmitidos</caption>
+      <image>https://raw.githubusercontent.com/diegofaraujo/nextgdrive/v0.1.1/docs/screenshots/preferences.png</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.diegofaraujo.NextGDrive.desktop</launchable>
   <url type="homepage">https://github.com/diegofaraujo/nextgdrive</url>
   <url type="bugtracker">https://github.com/diegofaraujo/nextgdrive/issues</url>

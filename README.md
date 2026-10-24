@@ -11,6 +11,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/account.png" alt="An account in Next GDrive: storage, sync mode and status" width="480">
+</p>
+
 > **Status:** early development, not yet ready for important data. Test it on a non-critical account first.
 
 ## Features
