@@ -17,7 +17,7 @@ pub use change_selection::{ChangeSelection, DeselectReport, LocalCopies};
 pub use get_account_status::GetAccountStatus;
 pub use list_accounts::ListAccounts;
 pub use remove_account::RemoveAccount;
-pub use settings::{GetSettings, SetNotifications, SetSyncRoot};
+pub use settings::{GetSettings, SetCacheLimit, SetNotifications, SetSyncRoot};
 pub use sync::{
     Conflict, ConflictReason, Deletions, MASS_DELETION_MIN, SkipReason, SyncAccount, SyncOptions,
     SyncProgress, SyncReport,
@@ -25,6 +25,6 @@ pub use sync::{
 
 #[cfg(test)]
 pub(crate) mod fakes;
-pub use offline::{Offline, OfflineFile, OfflineItem};
+pub use offline::{CacheUsage, Offline, OfflineFile, OfflineItem};
 pub use sync_mode::{ModeChange, SetSyncMode};
 pub use trash::{DriveTrash, TrashEntry};

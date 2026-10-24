@@ -17,7 +17,7 @@ use nextgdrive_domain::DriveItemId;
 
 pub struct DiskBlockCache {
     root: PathBuf,
-    limit: u64,
+    limit: AtomicU64,
     /// Bytes on disk, kept up to date without rescanning.
     used: AtomicU64,
     /// Only one eviction at a time.
@@ -77,12 +77,22 @@ impl DiskBlockCache {
         let used = blocks(&root).iter().map(|(_, size, _)| size).sum();
         Ok(Self {
             root,
-            limit,
+            limit: AtomicU64::new(limit),
             used: AtomicU64::new(used),
             evicting: Mutex::new(()),
             pinned: Mutex::default(),
             pinned_bytes: AtomicU64::new(0),
         })
+    }
+
+    pub fn limit(&self) -> u64 {
+        self.limit.load(Ordering::Relaxed)
+    }
+
+    /// Takes effect at once: lowering it evicts right away.
+    pub fn set_limit(&self, limit: u64) {
+        self.limit.store(limit, Ordering::Relaxed);
+        self.evict();
     }
 
     pub fn used(&self) -> u64 {
@@ -113,16 +123,20 @@ impl DiskBlockCache {
         let pinned = self.pinned.lock().map(|p| p.clone()).unwrap_or_default();
         let is_pinned = |path: &Path| path.parent().is_some_and(|dir| pinned.contains(dir));
         let mut all = blocks(&self.root);
+        // Recounted: another handle (e.g. clearing from the app) may have
+        // removed blocks meanwhile.
+        self.used
+            .store(all.iter().map(|(_, size, _)| size).sum(), Ordering::Relaxed);
         let pinned_bytes = all
             .iter()
             .filter(|(_, _, p)| is_pinned(p))
             .map(|(_, size, _)| size)
             .sum();
         self.pinned_bytes.store(pinned_bytes, Ordering::Relaxed);
-        if self.evictable() <= self.limit {
+        if self.evictable() <= self.limit() {
             return;
         }
-        let target = self.limit / 10 * 9;
+        let target = self.limit() / 10 * 9;
         all.retain(|(_, _, path)| !is_pinned(path));
         all.sort();
         for (_, size, path) in all {
@@ -168,10 +182,43 @@ impl BlockCache for DiskBlockCache {
         self.used
             .fetch_sub(previous.min(self.used()), Ordering::Relaxed);
         self.used.fetch_add(data.len() as u64, Ordering::Relaxed);
-        if self.evictable() > self.limit {
+        if self.evictable() > self.limit() {
             self.evict();
         }
         Ok(())
+    }
+
+    fn usage(&self) -> u64 {
+        let used = blocks(&self.root).iter().map(|(_, size, _)| size).sum();
+        self.used.store(used, Ordering::Relaxed);
+        used
+    }
+
+    fn clear_except(&self, keep: &[(DriveItemId, String)]) -> Result<u64, PortError> {
+        let keep: HashSet<PathBuf> = keep
+            .iter()
+            .map(|(file, version)| self.version_dir(file, version))
+            .collect();
+        let mut freed = 0;
+        for (_, size, path) in blocks(&self.root) {
+            if path.parent().is_some_and(|dir| keep.contains(dir)) {
+                continue;
+            }
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    freed += size;
+                    for dir in path.ancestors().skip(1).take(2) {
+                        let _ = fs::remove_dir(dir);
+                    }
+                }
+                // Gone already (evicted meanwhile): fine.
+                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                Err(e) => return Err(error(&path, e)),
+            }
+        }
+        self.used
+            .fetch_sub(freed.min(self.used()), Ordering::Relaxed);
+        Ok(freed)
     }
 
     fn contains(&self, key: &BlockKey) -> bool {
@@ -264,6 +311,28 @@ mod tests {
         // Unpinned, it is an ordinary (old) block again.
         cache.pin(&[]);
         assert!(!cache.contains(&key("offline", 0)));
+    }
+
+    #[test]
+    fn clears_all_but_the_kept_files_and_follows_a_new_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskBlockCache::open(dir.path(), 1000).unwrap();
+        cache.put(&key("keep", 0), &[0; 10]).unwrap();
+        cache.put(&key("drop", 0), &[0; 20]).unwrap();
+        cache.put(&key("drop", 1), &[0; 30]).unwrap();
+        assert_eq!(cache.usage(), 60);
+
+        let freed = cache
+            .clear_except(&[(DriveItemId::new("keep"), "md5".into())])
+            .unwrap();
+
+        assert_eq!(freed, 50);
+        assert_eq!(cache.usage(), 10);
+        assert!(cache.contains(&key("keep", 0)));
+
+        cache.put(&key("x", 0), &[0; 40]).unwrap();
+        cache.set_limit(30);
+        assert!(cache.usage() <= 30, "{}", cache.usage());
     }
 
     #[test]

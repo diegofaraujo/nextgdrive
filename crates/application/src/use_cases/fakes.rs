@@ -1058,6 +1058,25 @@ impl BlockCache for InMemoryBlocks {
 
     /// Nothing is ever evicted here, so pinning changes nothing.
     fn pin(&self, _: &[(DriveItemId, String)]) {}
+
+    fn usage(&self) -> u64 {
+        self.0
+            .lock()
+            .unwrap()
+            .values()
+            .map(|b| b.len() as u64)
+            .sum()
+    }
+
+    fn clear_except(&self, keep: &[(DriveItemId, String)]) -> Result<u64, PortError> {
+        let mut blocks = self.0.lock().unwrap();
+        let before: u64 = blocks.values().map(|b| b.len() as u64).sum();
+        blocks.retain(|key, _| {
+            keep.iter()
+                .any(|(id, version)| *id == key.file && *version == key.version)
+        });
+        Ok(before - blocks.values().map(|b| b.len() as u64).sum::<u64>())
+    }
 }
 
 /// Staging area in memory.

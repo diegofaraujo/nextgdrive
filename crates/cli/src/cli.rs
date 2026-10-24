@@ -16,6 +16,13 @@ pub enum Command {
     Trash(TrashCommand),
     Stream { email: String, mountpoint: PathBuf },
     Offline(OfflineCommand),
+    Cache(CacheCommand),
+}
+
+pub enum CacheCommand {
+    Show,
+    Clear,
+    Limit { bytes: u64 },
 }
 
 pub enum OfflineCommand {
@@ -251,6 +258,23 @@ fn command(i18n: &Localizer) -> clap::Command {
                 )
                 .subcommand(clap::Command::new("list").about(i18n.tr("cli-offline-list-about")))
         })
+        .subcommand({
+            let invalid = i18n.tr("cli-cache-invalid-size");
+            group("cache", "cli-cache-about")
+                .subcommand(clap::Command::new("show").about(i18n.tr("cli-cache-show-about")))
+                .subcommand(clap::Command::new("clear").about(i18n.tr("cli-cache-clear-about")))
+                .subcommand(
+                    clap::Command::new("limit")
+                        .about(i18n.tr("cli-cache-limit-about"))
+                        .arg(
+                            Arg::new("size")
+                                .value_name("SIZE")
+                                .required(true)
+                                .value_parser(move |s: &str| parse_size(s).ok_or(invalid.clone()))
+                                .help(i18n.tr("cli-cache-size")),
+                        ),
+                )
+        })
         .subcommand(
             group("trash", "cli-trash-about")
                 .subcommand(
@@ -297,6 +321,27 @@ fn localize_headings(command: clap::Command, i18n: &Localizer) -> clap::Command 
         command = command.mut_subcommand(name, |_| localized);
     }
     command
+}
+
+/// A size such as `5G`, `500MB` or `1.5GiB` (binary units), or plain bytes.
+fn parse_size(text: &str) -> Option<u64> {
+    let text = text.trim().to_ascii_uppercase();
+    let split = text
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != ',')
+        .unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let number: f64 = number.replace(',', ".").parse().ok()?;
+    let shift = match unit.trim().trim_end_matches("IB").trim_end_matches('B') {
+        "" => 0,
+        "K" => 10,
+        "M" => 20,
+        "G" => 30,
+        "T" => 40,
+        _ => return None,
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // Checked finite and positive.
+    (number.is_finite() && number > 0.0).then(|| (number * (1u64 << shift) as f64) as u64)
 }
 
 fn string(matches: &ArgMatches, id: &str) -> String {
@@ -376,6 +421,14 @@ fn from_matches(matches: &ArgMatches) -> Command {
             Some(("list", _)) => OfflineCommand::List,
             _ => no_subcommand(),
         }),
+        Some(("cache", m)) => Command::Cache(match m.subcommand() {
+            Some(("show", _)) => CacheCommand::Show,
+            Some(("clear", _)) => CacheCommand::Clear,
+            Some(("limit", m)) => CacheCommand::Limit {
+                bytes: m.get_one::<u64>("size").copied().unwrap_or_default(),
+            },
+            _ => no_subcommand(),
+        }),
         Some(("trash", m)) => Command::Trash(match m.subcommand() {
             Some(("list", m)) => TrashCommand::List {
                 email: string(m, "email"),
@@ -424,6 +477,21 @@ mod tests {
             "abc",
             "--keep-local"
         ]));
+    }
+
+    #[test]
+    fn cache_sizes_take_binary_units() {
+        assert_eq!(parse_size("5G"), Some(5 << 30));
+        assert_eq!(parse_size("500mb"), Some(500 << 20));
+        assert_eq!(parse_size("1.5GiB"), Some(3 << 29));
+        assert_eq!(parse_size("1,5 G"), Some(3 << 29));
+        assert_eq!(parse_size("4096"), Some(4096));
+        assert_eq!(parse_size("5X"), None);
+        assert_eq!(parse_size("0"), None);
+        assert!(matches!(
+            parse_args(&["cache", "limit", "2G"]),
+            Command::Cache(CacheCommand::Limit { bytes }) if bytes == 2 << 30
+        ));
     }
 
     #[test]

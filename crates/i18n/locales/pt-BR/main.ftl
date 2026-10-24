@@ -94,6 +94,8 @@ mode-kept-files = Os arquivos que só existiam neste computador foram movidos pa
 
 offline-complete = { $total }, neste computador
 offline-progress = { $cached } de { $total } baixados
+cache-usage = { $used } em uso, dos quais { $offline } disponíveis offline. Limite: { $limit } (arquivos offline não contam).
+cache-cleared = { $freed } liberados. Os arquivos são baixados novamente ao serem abertos.
 
 ## CLI
 
@@ -165,9 +167,9 @@ cli-stream-mounted = O Google Drive está disponível em { $path }. Pressione Ct
 cli-stream-unmounted = Pasta do Google Drive fechada.
 cli-config-mode-about = Espelhar as pastas selecionadas, ou transmitir todo o Drive (arquivos baixados ao abrir)
 cli-config-mode-value = "mirror" (espelhar) ou "stream" (transmitir)
-cli-mode-stream = { $email } agora transmite todo o Google Drive na pasta dela.
+cli-mode-stream = { $email } agora transmite todo o Google Drive na pasta da conta.
 cli-mode-mirror = { $email } agora espelha as pastas selecionadas. Escolha-as com "nextgdrive sync select".
-cli-stream-already-mounted = { $email } já é transmitida na pasta dela pelo Next GDrive em segundo plano.
+cli-stream-already-mounted = { $email } já é transmitida na pasta da conta pelo Next GDrive em segundo plano.
 cli-offline-about = Manter arquivos e pastas transmitidos neste computador, para usá-los sem internet
 cli-offline-add-about = Deixar um arquivo ou pasta disponível offline
 cli-offline-remove-about = Deixar de manter um arquivo ou pasta offline (continua no Google Drive)
@@ -178,6 +180,13 @@ cli-offline-removed = “{ $name }” não é mais mantido offline.
 cli-offline-empty = Nada está disponível offline.
 cli-offline-outside = { $path } não está dentro da pasta de uma conta vinculada.
 cli-offline-not-streamed = { $email } espelha as pastas, que estão sempre neste computador; o modo offline vale para contas transmitidas.
+cli-cache-about = Gerencia o cache dos arquivos transmitidos
+cli-cache-show-about = Mostra quanto espaço o cache usa
+cli-cache-clear-about = Remove o conteúdo baixado, exceto o que está disponível offline (nada muda no Google Drive)
+cli-cache-limit-about = Define quanto espaço o cache pode usar (arquivos offline não contam)
+cli-cache-size = Tamanho, ex.: 5G ou 500M
+cli-cache-invalid-size = não é um tamanho: use ex.: 5G, 500M ou 1,5G
+cli-cache-limit-set = O cache agora pode usar até { $limit }.
 
 ## GUI
 
@@ -291,6 +300,17 @@ gui-offline-empty = Nada ainda. Adicione arquivos ou pastas com os botões acima
 gui-offline-add-file = Adicionar um arquivo
 gui-offline-add-folder = Adicionar uma pasta
 gui-offline-remove = Deixar de manter offline
+gui-cache-group = Arquivos Transmitidos
+gui-cache-description = Contas no modo Transmitir guardam em cache o que você abre, para abrir mais rápido da próxima vez.
+gui-cache-usage = Espaço em Uso
+gui-cache-calculating = Calculando…
+gui-cache-limit = Limite do Cache
+gui-cache-limit-subtitle = Acima dele, o conteúdo mais antigo é removido; arquivos offline não contam
+gui-cache-clear = Limpar Cache
+gui-cache-clear-subtitle = Libera o espaço; arquivos offline são mantidos
+gui-cache-clear-action = Limpar
+gui-cache-clear-title = Limpar o cache?
+gui-cache-clear-body = O conteúdo baixado é removido deste computador, exceto os arquivos disponíveis offline. Nada muda no Google Drive; os arquivos são baixados novamente ao serem abertos.
 
 ## Errors
 

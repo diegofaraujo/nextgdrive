@@ -8,7 +8,7 @@ use gtk::{gio, glib};
 use nextgdrive_application::use_cases::OfflineItem;
 use nextgdrive_domain::{Account, DriveItemId, ItemKind};
 
-use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
+use crate::ctx::{Ctx, keep_alive, navigation_page, spawn, wake_host};
 
 /// How often the list refreshes while something downloads (each refresh
 /// walks the offline folders in Drive, so not when nothing changes).
@@ -239,7 +239,7 @@ impl OfflinePage {
                     .add(&account, &relative)
                     .await
                     .map_err(|e| i18n.app_error(&e))?;
-                wake().await;
+                wake_host().await;
                 Ok::<_, String>(item.name)
             },
             move |result| {
@@ -278,7 +278,7 @@ impl OfflinePage {
                     .offline(&cache)
                     .remove(&account, &id)
                     .map_err(|e| i18n.app_error(&e))?;
-                wake().await;
+                wake_host().await;
                 Ok::<_, String>(())
             },
             move |result| {
@@ -289,12 +289,5 @@ impl OfflinePage {
                 state.load();
             },
         );
-    }
-}
-
-/// The background process downloads (or releases) on its next round.
-async fn wake() {
-    if let Some(client) = nextgdrive_adapter_dbus::Client::connect().await {
-        let _ = client.sync_now().await;
     }
 }

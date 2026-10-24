@@ -42,6 +42,8 @@ pub struct Settings {
 impl Settings {
     pub const DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
     pub const DEFAULT_CACHE_LIMIT: u64 = 5 << 30;
+    /// Below this, streaming would keep fetching the same blocks again.
+    pub const MIN_CACHE_LIMIT: u64 = 256 << 20;
 
     pub fn mode(&self, account: &AccountId) -> SyncMode {
         if self.streamed.contains(account) {

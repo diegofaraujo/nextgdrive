@@ -94,6 +94,8 @@ mode-kept-files = Files that existed only on this computer were moved to { $path
 
 offline-complete = { $total }, on this computer
 offline-progress = { $cached } of { $total } downloaded
+cache-usage = { $used } in use, { $offline } of it available offline. Limit: { $limit } (offline files not counted).
+cache-cleared = Freed { $freed }. Files are downloaded again when opened.
 
 ## CLI
 
@@ -178,6 +180,13 @@ cli-offline-removed = “{ $name }” is no longer kept offline.
 cli-offline-empty = Nothing is available offline.
 cli-offline-outside = { $path } is not inside the folder of a linked account.
 cli-offline-not-streamed = { $email } mirrors its folders, which are always on this computer; offline applies to streamed accounts.
+cli-cache-about = Manage the cache of streamed files
+cli-cache-show-about = Show how much space the cache uses
+cli-cache-clear-about = Remove downloaded content, except what is available offline (nothing in Google Drive changes)
+cli-cache-limit-about = Set how much space the cache may use (offline files not counted)
+cli-cache-size = Size, e.g. 5G or 500M
+cli-cache-invalid-size = not a size: use e.g. 5G, 500M or 1.5G
+cli-cache-limit-set = The cache may now use up to { $limit }.
 
 ## GUI
 
@@ -291,6 +300,17 @@ gui-offline-empty = Nothing yet. Add files or folders with the buttons above.
 gui-offline-add-file = Add a File
 gui-offline-add-folder = Add a Folder
 gui-offline-remove = Stop keeping offline
+gui-cache-group = Streamed Files
+gui-cache-description = Accounts in Stream mode keep what you open in a cache, so it opens faster the next time.
+gui-cache-usage = Space Used
+gui-cache-calculating = Calculating…
+gui-cache-limit = Cache Limit
+gui-cache-limit-subtitle = Older content is removed past this; offline files are not counted
+gui-cache-clear = Clear Cache
+gui-cache-clear-subtitle = Frees the space; offline files are kept
+gui-cache-clear-action = Clear
+gui-cache-clear-title = Clear the cache?
+gui-cache-clear-body = Downloaded content is removed from this computer, except files available offline. Nothing changes in Google Drive; files are downloaded again when opened.
 
 ## Errors
 
