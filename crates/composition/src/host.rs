@@ -346,12 +346,73 @@ async fn run(
 struct Mounts {
     mounted: HashMap<AccountId, (PathBuf, crate::stream::StreamMount)>,
     cache: Option<Arc<nextgdrive_adapter_cache::DiskBlockCache>>,
+    /// Keeps offline items downloaded; one run at a time.
+    offline: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Mounts {
     /// Unmounts everything, waiting until done: before the process exits,
     /// or the folders are left as dead mounts ("not connected").
+    /// Pins the files of every streamed account's offline items and
+    /// downloads what is missing, in the background.
+    fn refresh_offline(
+        &mut self,
+        services: &Arc<Services>,
+        accounts: Vec<Account>,
+        reporter: &Arc<Reporter>,
+        i18n: &Localizer,
+    ) {
+        if self
+            .offline
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
+        {
+            return;
+        }
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        let preloaders: HashMap<AccountId, crate::stream::Preloader> = self
+            .mounted
+            .iter()
+            .map(|(id, (_, mount))| (id.clone(), mount.preloader()))
+            .collect();
+        let (services, reporter, i18n) = (services.clone(), reporter.clone(), i18n.clone());
+        self.offline = Some(tokio::spawn(async move {
+            let offline = services.offline(&cache);
+            let mut pinned = Vec::new();
+            let mut wanted = Vec::new();
+            for account in accounts {
+                match offline.files(&account).await {
+                    Ok(files) => {
+                        pinned.extend(files.iter().map(|f| (f.id.clone(), f.version.clone())));
+                        wanted.push((account, files));
+                    }
+                    Err(e) => (reporter.log)(format!("{}: {}", account.email, i18n.app_error(&e))),
+                }
+            }
+            // Pinned first: what is about to be downloaded is never evicted.
+            nextgdrive_application::ports::BlockCache::pin(&*cache, &pinned);
+            for (account, files) in wanted {
+                if let Err(e) = offline.download(&account, &files).await {
+                    (reporter.log)(format!("{}: {}", account.email, i18n.app_error(&e)));
+                }
+                // Their folders too, so they can be browsed without internet.
+                if let Some(preloader) = preloaders.get(&account.id) {
+                    let settings = services.local.get_settings().execute();
+                    let ids: Vec<_> = settings
+                        .map(|s| s.offline_items(&account.id).cloned().collect())
+                        .unwrap_or_default();
+                    preloader.preload(&ids).await;
+                }
+            }
+        }));
+    }
+
     async fn unmount_all(&mut self) {
+        if let Some(task) = self.offline.take() {
+            task.abort();
+        }
         let unmounts: Vec<_> = self
             .mounted
             .drain()
@@ -401,6 +462,7 @@ impl Mounts {
                 tokio::task::spawn_blocking(move || drop(mount));
             }
         }
+        let streamed: Vec<Account> = wanted.values().map(|(a, _)| (*a).clone()).collect();
         for (id, (account, dir)) in wanted {
             if self.mounted.contains_key(&id) {
                 continue;
@@ -444,6 +506,9 @@ impl Mounts {
                 }
                 Err(message) => problem(message),
             }
+        }
+        if !streamed.is_empty() {
+            self.refresh_offline(services, streamed, reporter, i18n);
         }
     }
 }

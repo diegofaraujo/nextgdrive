@@ -631,3 +631,45 @@ async fn trashing_over_a_placeholder_works_as_cosmic_files_does_it() {
         .collect();
     assert_eq!(names, ["a.txt", "Docs"]);
 }
+
+#[tokio::test]
+async fn without_drive_the_last_listing_is_still_shown() {
+    let w = world(Duration::ZERO);
+    let docs = w.docs().await;
+    w.fs().list(docs).await.unwrap();
+
+    w.drive.fail_listing("docs");
+
+    let names: Vec<_> = w
+        .fs()
+        .list(docs)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert_eq!(names, ["a.txt", "Budget.html"]);
+}
+
+#[tokio::test]
+async fn preloaded_folders_can_be_browsed_without_drive() {
+    let w = world(Duration::ZERO);
+    w.fs().preload(&DriveItemId::new("docs")).await.unwrap();
+
+    // Nothing was opened by hand, and now Drive cannot be listed.
+    w.drive.fail_listing("root");
+    w.drive.fail_listing("docs");
+
+    let file = w.path(&["My Drive", "Docs", "a.txt"]).await;
+    assert_eq!(file.attr.size, 20);
+}
+
+#[tokio::test]
+async fn preloading_a_file_lists_the_folder_holding_it() {
+    let w = world(Duration::ZERO);
+    w.fs().preload(&DriveItemId::new("a")).await.unwrap();
+    w.drive.fail_listing("root");
+    w.drive.fail_listing("docs");
+
+    assert_eq!(w.path(&["My Drive", "Docs", "a.txt"]).await.attr.size, 20);
+}

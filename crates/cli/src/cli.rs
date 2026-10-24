@@ -15,6 +15,13 @@ pub enum Command {
     Sync(SyncCommand),
     Trash(TrashCommand),
     Stream { email: String, mountpoint: PathBuf },
+    Offline(OfflineCommand),
+}
+
+pub enum OfflineCommand {
+    Add { path: PathBuf },
+    Remove { path: PathBuf },
+    List,
 }
 
 pub enum TrashCommand {
@@ -223,6 +230,27 @@ fn command(i18n: &Localizer) -> clap::Command {
                         .help(i18n.tr("cli-stream-mountpoint")),
                 ),
         )
+        .subcommand({
+            let path = || {
+                Arg::new("path")
+                    .value_name("PATH")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help(i18n.tr("cli-offline-path"))
+            };
+            group("offline", "cli-offline-about")
+                .subcommand(
+                    clap::Command::new("add")
+                        .about(i18n.tr("cli-offline-add-about"))
+                        .arg(path()),
+                )
+                .subcommand(
+                    clap::Command::new("remove")
+                        .about(i18n.tr("cli-offline-remove-about"))
+                        .arg(path()),
+                )
+                .subcommand(clap::Command::new("list").about(i18n.tr("cli-offline-list-about")))
+        })
         .subcommand(
             group("trash", "cli-trash-about")
                 .subcommand(
@@ -338,6 +366,16 @@ fn from_matches(matches: &ArgMatches) -> Command {
                 .cloned()
                 .unwrap_or_default(),
         },
+        Some(("offline", m)) => Command::Offline(match m.subcommand() {
+            Some(("add", m)) => OfflineCommand::Add {
+                path: m.get_one::<PathBuf>("path").cloned().unwrap_or_default(),
+            },
+            Some(("remove", m)) => OfflineCommand::Remove {
+                path: m.get_one::<PathBuf>("path").cloned().unwrap_or_default(),
+            },
+            Some(("list", _)) => OfflineCommand::List,
+            _ => no_subcommand(),
+        }),
         Some(("trash", m)) => Command::Trash(match m.subcommand() {
             Some(("list", m)) => TrashCommand::List {
                 email: string(m, "email"),

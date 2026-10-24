@@ -341,7 +341,20 @@ where
         };
         let children = match fresh {
             Some(children) => children,
-            None => self.fetch_listing(dir).await?,
+            None => match self.fetch_listing(dir).await {
+                Ok(children) => children,
+                // Offline (or Drive failing): the last listing is better than
+                // none, and offline files can still be opened from it.
+                Err(error) => {
+                    let stale = self
+                        .state
+                        .table()
+                        .listings
+                        .get(&dir)
+                        .map(|(_, c)| c.clone());
+                    stale.ok_or(error)?
+                }
+            },
         };
         let table = self.state.table();
         let local = table.local_children.get(&dir).cloned().unwrap_or_default();
@@ -355,6 +368,81 @@ where
                 })
             })
             .collect())
+    }
+
+    /// Lists every folder from the account folder down to the item `target`,
+    /// and every folder inside it, so all of it can be browsed offline.
+    pub async fn preload(&self, target: &DriveItemId) -> Result<(), StreamError> {
+        let token = self.tokens.access_token(self.account).await?;
+        // The chain of folders from the drive's root down to `target`.
+        let drives = self.drive.drives(&token).await.map_err(AppError::Drive)?;
+        // For a file, the folder holding it.
+        let item = self
+            .drive
+            .item(&token, target)
+            .await
+            .map_err(AppError::Drive)?;
+        let target = match item.kind {
+            ItemKind::Folder => item.id,
+            _ => item.parents.first().cloned().ok_or(StreamError::NotFound)?,
+        };
+        let mut chain = vec![target];
+        loop {
+            let top = chain.last().expect("never empty").clone();
+            if drives.iter().any(|d| d.root == top) {
+                break;
+            }
+            let item = self
+                .drive
+                .item(&token, &top)
+                .await
+                .map_err(AppError::Drive)?;
+            match item.parents.first() {
+                Some(parent) if chain.len() < 256 => chain.push(parent.clone()),
+                _ => return Err(StreamError::NotFound),
+            }
+        }
+        chain.reverse();
+        // Walk down from the account folder, through "Shared drives" if needed.
+        let mut node = ROOT;
+        let shared = drives
+            .iter()
+            .any(|d| d.root == chain[0] && matches!(d.kind, DriveKind::Shared { .. }));
+        if shared {
+            node = self
+                .child(node, |c| matches!(c, Content::SharedDrives))
+                .await?;
+        }
+        for id in &chain {
+            node = self
+                .child(node, |c| matches!(c, Content::Folder(f) if f == id))
+                .await?;
+        }
+        // Then everything inside.
+        let mut pending = vec![node];
+        while let Some(dir) = pending.pop() {
+            for entry in self.list(dir).await? {
+                if entry.attr.kind == NodeKind::Dir {
+                    pending.push(entry.attr.id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The child of `dir` whose content matches.
+    async fn child(
+        &self,
+        dir: NodeId,
+        matches: impl Fn(&Content) -> bool,
+    ) -> Result<NodeId, StreamError> {
+        let entries = self.list(dir).await?;
+        let table = self.state.table();
+        entries
+            .iter()
+            .map(|e| e.attr.id)
+            .find(|id| table.nodes.get(id).is_some_and(|n| matches(&n.content)))
+            .ok_or(StreamError::NotFound)
     }
 
     pub async fn lookup(&self, dir: NodeId, name: &str) -> Result<Option<Entry>, StreamError> {
@@ -615,7 +703,7 @@ where
 }
 
 /// Drive's version of a file's content: its MD5, or else its modification time.
-fn version_of(item: &DriveItem) -> String {
+pub(crate) fn version_of(item: &DriveItem) -> String {
     match &item.kind {
         ItemKind::File { md5: Some(md5), .. } => md5.clone(),
         _ => {

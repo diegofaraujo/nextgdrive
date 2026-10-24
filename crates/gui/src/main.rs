@@ -10,6 +10,7 @@ mod autostart;
 mod ctx;
 mod folders_page;
 mod notifications;
+mod offline_page;
 mod preferences;
 mod trash_page;
 mod tray;

@@ -49,6 +49,8 @@ struct AccountStream {
     quota: Mutex<Option<(Instant, StorageQuota)>>,
     events: EventSink,
     i18n: Localizer,
+    /// Offline items whose folders were listed in this mount already.
+    preloaded: Mutex<std::collections::HashSet<nextgdrive_domain::DriveItemId>>,
 }
 
 type Fs<'a> = StreamingDrive<
@@ -201,6 +203,35 @@ pub fn open_cache(i18n: &Localizer, limit: u64) -> Result<Arc<DiskBlockCache>, S
 pub struct StreamMount {
     _mount: Mount,
     retry: tokio::task::JoinHandle<()>,
+    stream: Arc<AccountStream>,
+}
+
+/// Lists offline folders in a mount ahead of time, so they can be browsed
+/// without internet.
+#[derive(Clone)]
+pub struct Preloader(Arc<AccountStream>);
+
+impl Preloader {
+    /// Each item once per mount; failures are retried on the next call.
+    pub async fn preload(&self, ids: &[nextgdrive_domain::DriveItemId]) {
+        for id in ids {
+            let done = self.0.preloaded.lock().is_ok_and(|p| p.contains(id));
+            if done {
+                continue;
+            }
+            if self.0.fs().preload(id).await.is_ok()
+                && let Ok(mut preloaded) = self.0.preloaded.lock()
+            {
+                preloaded.insert(id.clone());
+            }
+        }
+    }
+}
+
+impl StreamMount {
+    pub fn preloader(&self) -> Preloader {
+        Preloader(self.stream.clone())
+    }
 }
 
 impl Drop for StreamMount {
@@ -231,6 +262,7 @@ pub fn mount(
         quota: Mutex::default(),
         events,
         i18n: i18n.clone(),
+        preloaded: Mutex::default(),
     });
     let pending = stream.fs().recover().map_err(|e| i18n.app_error(&e))?;
     if pending > 0 {
@@ -252,15 +284,17 @@ pub fn mount(
             ],
         )
     })?;
+    let retrying = stream.clone();
     let retry = tokio::spawn(async move {
         loop {
-            stream.retry_uploads().await;
+            retrying.retry_uploads().await;
             tokio::time::sleep(UPLOAD_CHECK_INTERVAL).await;
         }
     });
     Ok(StreamMount {
         _mount: mount,
         retry,
+        stream,
     })
 }
 

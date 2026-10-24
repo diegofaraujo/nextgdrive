@@ -4,6 +4,7 @@ mod change_selection;
 mod get_account_status;
 mod list_accounts;
 mod local_copies;
+mod offline;
 mod remove_account;
 mod settings;
 mod sync;
@@ -24,5 +25,6 @@ pub use sync::{
 
 #[cfg(test)]
 pub(crate) mod fakes;
+pub use offline::{Offline, OfflineFile, OfflineItem};
 pub use sync_mode::{ModeChange, SetSyncMode};
 pub use trash::{DriveTrash, TrashEntry};
