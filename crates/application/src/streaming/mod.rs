@@ -137,6 +137,9 @@ enum LocalDir {
     Trash,
     TrashFiles,
     TrashInfo,
+    /// An empty folder some trash implementations create in `files/` before
+    /// renaming the trashed folder over it.
+    Placeholder,
 }
 
 #[derive(Debug, Clone)]

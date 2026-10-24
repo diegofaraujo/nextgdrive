@@ -596,9 +596,38 @@ async fn only_the_trash_can_be_created_in_the_account_folder() {
         w.fs().mkdir(ROOT, "Notes").await,
         Err(StreamError::NotPermitted)
     ));
-    let (files, _) = trash_folders(&w).await;
+    let (_, info) = trash_folders(&w).await;
     assert!(matches!(
-        w.fs().mkdir(files, "x").await,
+        w.fs().mkdir(info, "x").await,
         Err(StreamError::NotPermitted)
     ));
+}
+
+#[tokio::test]
+async fn trashing_over_a_placeholder_works_as_cosmic_files_does_it() {
+    let w = world(Duration::from_secs(60));
+    let docs = w.docs().await;
+    let (files, info) = trash_folders(&w).await;
+    let my_drive = w.path(&["My Drive"]).await.attr.id;
+    // trash-rs: description, then an empty placeholder, then the rename over it.
+    w.fs().create(info, "a.txt.trashinfo").await.unwrap();
+    w.fs().create(files, "a.txt").await.unwrap();
+    w.fs().rename(docs, "a.txt", files, "a.txt").await.unwrap();
+    // A folder gets an empty folder as placeholder.
+    w.fs().mkdir(files, "Docs").await.unwrap();
+    w.fs()
+        .rename(my_drive, "Docs", files, "Docs")
+        .await
+        .unwrap();
+
+    assert_eq!(w.drive.trashed(), ["a", "docs"]);
+    let names: Vec<_> = w
+        .fs()
+        .list(files)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert_eq!(names, ["a.txt", "Docs"]);
 }

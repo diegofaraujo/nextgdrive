@@ -55,20 +55,23 @@ where
             (ROOT, None) if is_trash_name(name) => LocalDir::Trash,
             (_, Some(LocalDir::Trash)) if name == "files" => LocalDir::TrashFiles,
             (_, Some(LocalDir::Trash)) if name == "info" => LocalDir::TrashInfo,
+            (_, Some(LocalDir::TrashFiles)) => LocalDir::Placeholder,
             (_, Some(_)) => return Some(Err(StreamError::NotPermitted)),
             _ => return None,
         };
         Some(Ok(self.add_local(dir, name, Content::Local(kind))))
     }
 
-    /// A `.trashinfo` description, held in memory.
+    /// A `.trashinfo` description, held in memory, or an empty placeholder
+    /// in `files/`: trash-rs (COSMIC Files) creates one before renaming the
+    /// trashed item over it, so that two deletions never collide.
     pub(super) fn create_local(
         &self,
         dir: NodeId,
         name: &str,
     ) -> Option<Result<Entry, StreamError>> {
         match self.local_dir(dir)? {
-            LocalDir::TrashInfo => Some(Ok(self.add_local(
+            LocalDir::TrashInfo | LocalDir::TrashFiles => Some(Ok(self.add_local(
                 dir,
                 name,
                 Content::TrashInfo(Vec::new()),

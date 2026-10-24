@@ -105,10 +105,19 @@ fn activate(app: &adw::Application, hidden: bool) {
         let (terminated, mut on_terminate) = tokio::sync::mpsc::unbounded_channel::<()>();
         ctx::runtime().spawn(async move {
             use tokio::signal::unix::{SignalKind, signal};
-            if let Ok(mut term) = signal(SignalKind::terminate()) {
-                term.recv().await;
-                let _ = terminated.send(());
+            // SIGTERM ends the session; SIGINT is Ctrl+C in the terminal
+            // that started the app.
+            let (Ok(mut term), Ok(mut int)) = (
+                signal(SignalKind::terminate()),
+                signal(SignalKind::interrupt()),
+            ) else {
+                return;
+            };
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = int.recv() => {}
             }
+            let _ = terminated.send(());
         });
         let quitting = app.downgrade();
         glib::spawn_future_local(async move {
