@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Embedded in nextgdrive-gui, so it shows its icon without being installed. -->
+<gresources>
+  <gresource prefix="/io/github/diegofaraujo/NextGDrive">
+    <file>icons/hicolor/16x16/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/32x32/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/48x48/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/64x64/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/128x128/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/256x256/apps/io.github.diegofaraujo.NextGDrive.png</file>
+    <file>icons/hicolor/512x512/apps/io.github.diegofaraujo.NextGDrive.png</file>
+  </gresource>
+</gresources>

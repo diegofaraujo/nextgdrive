@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="Next GDrive" width="320">
+  <img src="docs/assets/logo.png" alt="Next GDrive" width="360">
 </p>
 
 <p align="center">
