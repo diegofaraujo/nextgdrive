@@ -25,6 +25,10 @@ mkdir -p dist
 # Run the tools without FUSE (CI containers have none).
 export APPIMAGE_EXTRACT_AND_RUN=1
 export DEPLOY_GTK_VERSION=4
+# appimagetool would validate the metainfo online, failing while its
+# screenshot URLs (pinned to the release tag) do not exist yet. CI validates
+# it offline.
+export LDAI_NO_APPSTREAM=1
 export LINUXDEPLOY_OUTPUT_VERSION="${VERSION}"
 export LDAI_OUTPUT="dist/NextGDrive-${VERSION}-${ARCH}.AppImage"
 export PATH="${TOOLS}:${PATH}"
