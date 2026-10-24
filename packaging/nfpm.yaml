@@ -1,0 +1,62 @@
+# Builds the .deb and .rpm packages from binaries already in target/release:
+#   VERSION=0.1.0 ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb
+# ARCH is the Go-style name (amd64, arm64); nfpm maps it per format.
+name: nextgdrive
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Next GDrive contributors <https://github.com/diegofaraujo/nextgdrive>
+description: |
+  Google Drive client: sync or stream your Google Drive.
+  Keeps My Drive and shared drives of one or more Google accounts on this
+  computer, mirroring chosen folders both ways or streaming the whole Drive
+  with files downloaded on demand. Includes a tray app and a command line.
+vendor: Next GDrive
+homepage: https://github.com/diegofaraujo/nextgdrive
+license: GPL-3.0-or-later
+
+contents:
+  - src: target/release/nextgdrive
+    dst: /usr/bin/nextgdrive
+    file_info: { mode: 0755 }
+  - src: target/release/nextgdrive-gui
+    dst: /usr/bin/nextgdrive-gui
+    file_info: { mode: 0755 }
+  - src: data/io.github.diegofaraujo.NextGDrive.desktop
+    dst: /usr/share/applications/io.github.diegofaraujo.NextGDrive.desktop
+  - src: data/io.github.diegofaraujo.NextGDrive.metainfo.xml
+    dst: /usr/share/metainfo/io.github.diegofaraujo.NextGDrive.metainfo.xml
+  - src: data/icons/hicolor/16x16/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/16x16/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/32x32/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/32x32/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/48x48/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/48x48/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/64x64/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/64x64/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/128x128/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/128x128/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/256x256/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/256x256/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: data/icons/hicolor/512x512/apps/io.github.diegofaraujo.NextGDrive.png
+    dst: /usr/share/icons/hicolor/512x512/apps/io.github.diegofaraujo.NextGDrive.png
+  - src: LICENSE
+    dst: /usr/share/licenses/nextgdrive/LICENSE
+
+# GTK >= 4.14 and libadwaita >= 1.5 (Ubuntu 24.04, Debian 13, Fedora 40 or
+# newer); fusermount3 for Stream mode.
+overrides:
+  deb:
+    depends:
+      - libgtk-4-1 (>= 4.14)
+      - libadwaita-1-0 (>= 1.5)
+      - fuse3
+    recommends:
+      - gnome-keyring | org.freedesktop.secrets
+  rpm:
+    depends:
+      - gtk4 >= 4.14
+      - libadwaita >= 1.5
+      - fuse3

@@ -110,7 +110,7 @@ Locking rule for `StreamState::table()` (a `std::sync::Mutex`): never call it in
 
 ### Google OAuth client
 
-The OAuth client (Google Cloud "Desktop app") is not in the repository; each developer uses their own. It is read from `NEXTGDRIVE_CLIENT_ID` + `NEXTGDRIVE_CLIENT_SECRET`, otherwise from the JSON downloaded from Google Cloud Console saved as `~/.config/nextgdrive/oauth-client.json`. The app requests the full `drive` scope (needed for two-way sync). While the Google Cloud app is in testing mode, only accounts listed as test users can sign in.
+The OAuth client (Google Cloud "Desktop app") is not in the repository; each developer uses their own. It is read from `NEXTGDRIVE_CLIENT_ID` + `NEXTGDRIVE_CLIENT_SECRET`, otherwise from the JSON downloaded from Google Cloud Console saved as `~/.config/nextgdrive/oauth-client.json`, otherwise from the client embedded at build time (`ClientConfig::embedded`: the same two variables read with `option_env!`). Release builds embed the project's production client (a separate Google Cloud project, in production but unverified: 100-user cap and an "unverified app" warning until Google's restricted-scope verification, which needs an annual CASA assessment) from the repository secrets of the same names; refresh tokens are tied to the client that issued them. The app requests the full `drive` scope (needed for two-way sync). While the Google Cloud app is in testing mode, only accounts listed as test users can sign in.
 
 ### i18n
 
@@ -118,6 +118,10 @@ The OAuth client (Google Cloud "Desktop app") is not in the repository; each dev
 - Locale comes from the system (`LC_ALL`/`LC_MESSAGES`/`LANG`); other variants map by language (`pt-PT` → `pt-BR`, `es-MX` → `es`). Try another language with e.g. `LANG=es_ES.UTF-8 cargo run -p nextgdrive-cli -- --help`.
 - The CLI uses clap's **builder** API (not derive) so help texts and section headings come from Fluent at runtime. Clap's own parse errors (e.g. "unrecognized subcommand") are still English-only.
 - GUI is built in Rust code, not `.ui` XML, so all text goes through `Localizer`. Set `use_markup(false)` on rows/labels that show user data (emails, file names).
+
+### Packaging and releases
+
+App id `io.github.diegofaraujo.NextGDrive`. `data/` holds the desktop entry, the AppStream metainfo (validated in CI with `appstreamcli` and `desktop-file-validate`), the icons and the GResource list; `packaging/nfpm.yaml` builds the `.deb` and `.rpm` from `target/release` (GTK ≥ 4.14 / libadwaita ≥ 1.5 as dependencies). Versions: root `Cargo.toml`, the newest `<release>` in the metainfo and the newest entry in `CHANGELOG.md` must agree (test in `gui/src/main.rs`); a `vX.Y.Z` tag publishes a release. See CONTRIBUTING.md → Releases.
 
 ## Commands
 

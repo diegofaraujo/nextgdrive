@@ -206,3 +206,31 @@ mod tests {
         }
     }
 }
+
+/// Each release is described in three places that must agree.
+#[cfg(test)]
+mod release_tests {
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+    fn read(path: &str) -> String {
+        std::fs::read_to_string(format!("{}/../../{path}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    #[test]
+    fn the_latest_release_notes_are_for_this_version() {
+        let metainfo = read("data/io.github.diegofaraujo.NextGDrive.metainfo.xml");
+        let latest = metainfo
+            .split("<release version=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next());
+        assert_eq!(latest, Some(VERSION), "newest <release> in the metainfo");
+
+        let changelog = read("CHANGELOG.md");
+        let latest = changelog
+            .lines()
+            .filter_map(|line| line.strip_prefix("## ["))
+            .find(|line| !line.starts_with("Unreleased"))
+            .and_then(|line| line.split(']').next());
+        assert_eq!(latest, Some(VERSION), "newest version in CHANGELOG.md");
+    }
+}
