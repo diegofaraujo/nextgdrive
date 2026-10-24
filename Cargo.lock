@@ -1770,6 +1770,8 @@ dependencies = [
  "fuser",
  "nextgdrive-application",
  "nextgdrive-domain",
+ "rustix",
+ "tempfile",
  "tokio",
 ]
 
