@@ -1,0 +1,67 @@
+name: Bug report
+description: Something does not work as it should.
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please do not include tokens, the contents of `oauth-client.json`, or private file names you would not want public.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Switch the account to Stream mode
+        2. Open the file manager in ~/GoogleDrive/<email>/My Drive
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Graphical app / tray
+        - Command line
+        - Mirror mode (synced folders)
+        - Stream mode (whole Drive, files on demand)
+        - Available offline / cache
+        - Sign-in / accounts
+        - Translations
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `nextgdrive --version`, or the commit you built.
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: Pop!_OS 24.04, COSMIC
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error messages
+      description: Output of the app (e.g. `nextgdrive daemon` or `nextgdrive-gui` started from a terminal).
+      render: text
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Data
+      options:
+        - label: Files were lost or changed unexpectedly (we treat these first).

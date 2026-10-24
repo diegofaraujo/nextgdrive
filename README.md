@@ -1,6 +1,15 @@
-# Next GDrive
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Next GDrive" width="320">
+</p>
 
-An open-source Google Drive sync client for Linux, written in Rust.
+<p align="center">
+  An open-source Google Drive client for Linux, written in Rust.
+</p>
+
+<p align="center">
+  <a href="https://github.com/diegofaraujo/nextgdrive/actions/workflows/ci.yml"><img src="https://github.com/diegofaraujo/nextgdrive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+</p>
 
 > **Status:** early development, not yet ready for important data. Test it on a non-critical account first.
 
@@ -80,7 +89,7 @@ The project follows Clean Architecture with a Hexagonal (Ports & Adapters) desig
 
 ## Contributing
 
-Contributions are welcome. Code, comments, commit messages, and documentation are written in English. Translations live in dedicated locale files.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and guidelines. Questions and ideas go to [Discussions](https://github.com/diegofaraujo/nextgdrive/discussions); to report a security problem, see [SECURITY.md](SECURITY.md).
 
 ## License
 

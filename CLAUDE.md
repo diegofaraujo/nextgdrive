@@ -22,6 +22,8 @@ Core requirements:
 
 - All code, identifiers, comments, commit messages, and project documentation (README, CONTRIBUTING, docs/, this file) must be written in **English** to ease open-source community contribution. Only translation resource files contain other languages.
 - Architecture follows **Clean Architecture + Hexagonal (Ports & Adapters)**. See below; respect the dependency rule.
+- **Git workflow:** `main` is protected and only accepts pull requests whose CI passes (`.github/workflows/ci.yml`: fmt, clippy, tests, MSRV check). Every feature or bug starts on its own branch from up-to-date `main` (`feat/…`, `fix/…`, `docs/…`, `refactor/…`, `chore/…`); PRs are squash-merged, so the PR title is the commit message on `main`. Never push to `main` directly. See `CONTRIBUTING.md`.
+- Project assets: `docs/assets/logo.png` (README), `data/icons/tray.svg` (tray icon, embedded in the GUI and drawn per state by recoloring its stroke).
 
 ## Architecture
 
