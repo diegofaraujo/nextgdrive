@@ -95,8 +95,32 @@ fn activate(app: &adw::Application, hidden: bool) {
     let ctx = ctx::Ctx::new(i18n.clone(), services, &nav, &toasts);
     nav.add(&accounts_page::build(&ctx));
 
+    let host = host.map(Arc::new);
+    if let Ok(host) = &host {
+        // However the app ends, streamed folders are unmounted first; a
+        // process that exits without that leaves them dead ("not connected").
+        let stopping = host.clone();
+        app.connect_shutdown(move |_| ctx::runtime().block_on(stopping.shutdown()));
+        // Ending the session sends SIGTERM: quit the normal way.
+        let (terminated, mut on_terminate) = tokio::sync::mpsc::unbounded_channel::<()>();
+        ctx::runtime().spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+            if let Ok(mut term) = signal(SignalKind::terminate()) {
+                term.recv().await;
+                let _ = terminated.send(());
+            }
+        });
+        let quitting = app.downgrade();
+        glib::spawn_future_local(async move {
+            if on_terminate.recv().await.is_some()
+                && let Some(app) = quitting.upgrade()
+            {
+                app.quit();
+            }
+        });
+    }
     let tray = match host {
-        Ok(host) => tray::start(i18n, Arc::new(host)),
+        Ok(host) => tray::start(i18n, host),
         Err(StartError::AlreadyRunning) => {
             ctx.toast(&ctx.i18n.tr("gui-host-elsewhere"));
             None

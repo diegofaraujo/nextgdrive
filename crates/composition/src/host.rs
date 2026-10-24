@@ -20,13 +20,15 @@ use tokio::sync::{mpsc, watch};
 
 use crate::Services;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum Command {
     SyncNow,
     Pause,
     Resume,
     /// Trash the many local deletions of this account (by email).
     ConfirmDeletions(String),
+    /// Unmount streamed folders and stop; answered once done.
+    Shutdown(tokio::sync::oneshot::Sender<()>),
 }
 
 /// Translated line describing something background sync did, for logs.
@@ -161,6 +163,15 @@ impl SyncHost {
     pub fn confirm_deletions(&self, email: &str) {
         self.control.confirm_deletions(email);
     }
+
+    /// Unmounts streamed folders and stops background sync. Call it before
+    /// the process exits.
+    pub async fn shutdown(&self) {
+        let (done, wait) = tokio::sync::oneshot::channel();
+        if self.control.commands.send(Command::Shutdown(done)).is_ok() {
+            let _ = wait.await;
+        }
+    }
 }
 
 impl Drop for SyncHost {
@@ -259,6 +270,11 @@ async fn run(
                             Some(Command::SyncNow) => force = true,
                             Some(Command::ConfirmDeletions(email)) => confirmed.extend(account_id(&email)),
                             Some(Command::Resume) => {}
+                            Some(Command::Shutdown(done)) => {
+                                mounts.unmount_all().await;
+                                let _ = done.send(());
+                                return;
+                            }
                         },
                     }
                 }
@@ -311,6 +327,11 @@ async fn run(
                     paused = false;
                     force = true;
                 }
+                Some(Command::Shutdown(done)) => {
+                    mounts.unmount_all().await;
+                    let _ = done.send(());
+                    return;
+                }
                 Some(Command::ConfirmDeletions(email)) => {
                     confirmed.extend(account_id(&email));
                     paused = false;
@@ -328,6 +349,19 @@ struct Mounts {
 }
 
 impl Mounts {
+    /// Unmounts everything, waiting until done: before the process exits,
+    /// or the folders are left as dead mounts ("not connected").
+    async fn unmount_all(&mut self) {
+        let unmounts: Vec<_> = self
+            .mounted
+            .drain()
+            .map(|(_, mount)| tokio::task::spawn_blocking(move || drop(mount)))
+            .collect();
+        for unmount in unmounts {
+            let _ = unmount.await;
+        }
+    }
+
     fn is_mounted(&self, dir: &std::path::Path) -> bool {
         self.mounted.values().any(|(mounted, _)| mounted == dir)
     }
@@ -341,6 +375,10 @@ impl Mounts {
         i18n: &Localizer,
         reporter: &Arc<Reporter>,
     ) {
+        // A mount left by a crash makes the folder unusable in any mode.
+        for account in accounts {
+            crate::stream::clear_stale_mount(&settings.account_dir(account));
+        }
         let wanted: HashMap<AccountId, (&Account, PathBuf)> = accounts
             .iter()
             .filter(|a| settings.mode(&a.id) == SyncMode::Stream)
