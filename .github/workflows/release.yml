@@ -11,6 +11,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - packaging/**
+      - flatpak/**
       - data/**
   workflow_dispatch:
 
@@ -20,6 +21,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   NFPM_VERSION: 2.48.0
+  FLATPAK_BUILDER_TOOLS: 3d6ff6697785b52ae34db8078e0ad5188a710b1f
 
 jobs:
   version:
@@ -143,6 +145,82 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  flatpak-sources:
+    name: Flatpak crate sources
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # Flatpak builds offline: every crate in Cargo.lock becomes a source.
+      - name: Generate cargo-sources.json
+        run: |
+          curl -fsSLo flatpak-cargo-generator.py \
+            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/${FLATPAK_BUILDER_TOOLS}/cargo/flatpak-cargo-generator.py
+          echo "0a2db6be87d75910facef28ab46d4d6460802e8419ab850d0caa6a364d26b380  flatpak-cargo-generator.py" | sha256sum -c
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet "aiohttp>=3.9.5,<4" "tomlkit>=0.13.3,<1" "PyYAML>=6.0.2,<7"
+          /tmp/venv/bin/python flatpak-cargo-generator.py Cargo.lock -o flatpak/cargo-sources.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-cargo-sources
+          path: flatpak/cargo-sources.json
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak (${{ matrix.arch }})
+    needs: [version, flatpak-sources]
+    strategy:
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-cargo-sources
+          path: flatpak
+      - name: Embed the OAuth client
+        env:
+          NEXTGDRIVE_CLIENT_ID: ${{ secrets.NEXTGDRIVE_CLIENT_ID }}
+          NEXTGDRIVE_CLIENT_SECRET: ${{ secrets.NEXTGDRIVE_CLIENT_SECRET }}
+        run: |
+          [ -n "${NEXTGDRIVE_CLIENT_ID}" ] || exit 0
+          python3 - <<'PY'
+          import os
+          path = "flatpak/io.github.diegofaraujo.NextGDrive.yml"
+          text = open(path).read()
+          anchor = '    CARGO_NET_OFFLINE: "true"\n'
+          extra = "".join(f'    {name}: "{os.environ[name]}"\n'
+                          for name in ("NEXTGDRIVE_CLIENT_ID", "NEXTGDRIVE_CLIENT_SECRET"))
+          assert anchor in text
+          open(path, "w").write(text.replace(anchor, anchor + extra))
+          PY
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: flatpak/io.github.diegofaraujo.NextGDrive.yml
+          bundle: NextGDrive-${{ env.VERSION }}-${{ matrix.arch }}.flatpak
+          arch: ${{ matrix.arch }}
+          cache-key: flatpak-builder-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          upload-artifact: false
+      # Reports what Flathub's review checks (some permissions need an
+      # exception there); informative here.
+      - name: Flathub linter
+        continue-on-error: true
+        run: |
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest flatpak/io.github.diegofaraujo.NextGDrive.yml || true
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-flatpak-${{ matrix.arch }}
+          path: NextGDrive-${{ env.VERSION }}-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
+
   install:
     name: Install on ${{ matrix.image }} (${{ matrix.arch }})
     needs: build
@@ -182,7 +260,7 @@ jobs:
   publish:
     name: Publish release
     if: github.ref_type == 'tag'
-    needs: [version, build, install]
+    needs: [version, build, install, flatpak]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -219,6 +297,7 @@ jobs:
           |---|---|
           | Ubuntu 24.04+, Debian 13+, Pop!_OS | `.deb`: `sudo apt install ./nextgdrive_*.deb` |
           | Fedora, openSUSE | `.rpm`: `sudo dnf install ./nextgdrive-*.rpm` |
+          | Any distribution | `.flatpak`: `flatpak install --user ./NextGDrive-*.flatpak` (Flathub soon) |
           | Any distribution | `.AppImage`: make it executable and run it |
           | Manual | `.tar.gz`: copy `bin/` and `share/` into `~/.local/` |
 
