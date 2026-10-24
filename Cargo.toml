@@ -14,3 +14,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[profile.release]
+# Smaller packages: no debug symbols, and less duplicated code across crates.
+strip = true
+lto = "thin"

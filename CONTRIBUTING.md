@@ -26,6 +26,26 @@ cargo test
 
 CI runs the same checks, plus a build with the minimum supported Rust version (1.92).
 
+## Releases
+
+Versions follow [Semantic Versioning](https://semver.org/) and are published by tag: pushing `vX.Y.Z` makes GitHub Actions build the packages and publish the release.
+
+1. Open a pull request named "Release X.Y.Z" that:
+   - sets `version` in the root `Cargo.toml` (and runs `cargo check` to update `Cargo.lock`);
+   - moves the `Unreleased` entries of `CHANGELOG.md` under `## [X.Y.Z] - <date>`, and updates the links at the bottom;
+   - adds a `<release version="X.Y.Z" date="<date>">` at the top of `<releases>` in `data/io.github.diegofaraujo.NextGDrive.metainfo.xml`, with the highlights.
+
+   A test fails if those three disagree.
+2. Merge it, then tag the merge commit on `main`:
+
+   ```bash
+   git switch main && git pull
+   git tag -a vX.Y.Z -m "Next GDrive X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+Release builds embed the project's OAuth client from the repository secrets `NEXTGDRIVE_CLIENT_ID` and `NEXTGDRIVE_CLIENT_SECRET` (read at build time). Development builds have none, so each contributor uses their own client; your own client (environment variables or `oauth-client.json`) always takes precedence over the embedded one.
+
 ## Guidelines
 
 - **Architecture.** The project follows Clean Architecture with Ports & Adapters, one crate per layer or adapter; dependencies point inward only. `domain` and `application` never depend on Google APIs, the filesystem, GTK or clap. [CLAUDE.md](CLAUDE.md) describes each crate, the patterns to follow, and the invariants the sync engine keeps.

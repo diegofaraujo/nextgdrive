@@ -11,6 +11,8 @@ pub const CLIENT_SECRET_VAR: &str = "NEXTGDRIVE_CLIENT_SECRET";
 ///
 /// For installed apps Google does not treat the secret as confidential, but it
 /// is still kept out of the repository: each developer uses their own client.
+/// Release builds embed the project's client, read from the same variables at
+/// build time.
 #[derive(Clone)]
 pub struct ClientConfig {
     pub client_id: String,
@@ -41,8 +43,27 @@ struct ClientEntry {
 
 impl ClientConfig {
     /// Reads the environment variables if both are set, otherwise the JSON file
-    /// downloaded from Google Cloud Console.
+    /// downloaded from Google Cloud Console, otherwise the client embedded in
+    /// the build (if any). Your own client always wins over the project's.
     pub fn load(file: &Path) -> Result<Self, ClientConfigError> {
+        Self::load_or(file, Self::embedded())
+    }
+
+    /// The client set in the environment when this was built.
+    pub fn embedded() -> Option<Self> {
+        match (
+            option_env!("NEXTGDRIVE_CLIENT_ID"),
+            option_env!("NEXTGDRIVE_CLIENT_SECRET"),
+        ) {
+            (Some(id), Some(secret)) if !id.is_empty() && !secret.is_empty() => Some(Self {
+                client_id: id.to_owned(),
+                client_secret: secret.to_owned(),
+            }),
+            _ => None,
+        }
+    }
+
+    fn load_or(file: &Path, embedded: Option<Self>) -> Result<Self, ClientConfigError> {
         if let (Ok(client_id), Ok(client_secret)) =
             (env::var(CLIENT_ID_VAR), env::var(CLIENT_SECRET_VAR))
         {
@@ -51,10 +72,18 @@ impl ClientConfig {
                 client_secret,
             });
         }
-        let text = fs::read_to_string(file).map_err(|e| match e.kind() {
-            io::ErrorKind::NotFound => ClientConfigError::NotFound(file.to_owned()),
-            _ => ClientConfigError::Unreadable(file.to_owned(), e.to_string()),
-        })?;
+        let text = match fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return embedded.ok_or_else(|| ClientConfigError::NotFound(file.to_owned()));
+            }
+            Err(e) => {
+                return Err(ClientConfigError::Unreadable(
+                    file.to_owned(),
+                    e.to_string(),
+                ));
+            }
+        };
         Self::parse(&text)
             .map_err(|e| ClientConfigError::Unreadable(file.to_owned(), e.to_string()))
     }
@@ -81,6 +110,40 @@ mod tests {
         .unwrap();
         assert_eq!(config.client_id, "id.apps.googleusercontent.com");
         assert_eq!(config.client_secret, "s");
+    }
+
+    #[test]
+    fn your_own_client_file_wins_over_the_embedded_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("oauth-client.json");
+        let embedded = || {
+            Some(ClientConfig {
+                client_id: "project".into(),
+                client_secret: "s".into(),
+            })
+        };
+        // Only meaningful when the variables are not set in the test's environment.
+        if env::var(CLIENT_ID_VAR).is_ok() {
+            return;
+        }
+
+        assert_eq!(
+            ClientConfig::load_or(&file, embedded()).unwrap().client_id,
+            "project"
+        );
+        assert!(matches!(
+            ClientConfig::load_or(&file, None),
+            Err(ClientConfigError::NotFound(_))
+        ));
+        fs::write(
+            &file,
+            r#"{"installed":{"client_id":"mine","client_secret":"s"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ClientConfig::load_or(&file, embedded()).unwrap().client_id,
+            "mine"
+        );
     }
 
     #[test]
