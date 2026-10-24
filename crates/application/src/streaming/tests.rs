@@ -506,3 +506,99 @@ async fn deleting_a_file_while_it_uploads_leaves_nothing_in_drive() {
     );
     assert_eq!(w.staging.count(), 0);
 }
+
+// --- Desktop trash -------------------------------------------------------------
+
+/// What file managers do to "move to trash" on a mount other than home.
+async fn trash_folders(w: &World) -> (NodeId, NodeId) {
+    let trash = w.fs().mkdir(ROOT, ".Trash-1000").await.unwrap();
+    assert!(trash.attr.private);
+    let files = w.fs().mkdir(trash.attr.id, "files").await.unwrap();
+    let info = w.fs().mkdir(trash.attr.id, "info").await.unwrap();
+    (files.attr.id, info.attr.id)
+}
+
+#[tokio::test]
+async fn moving_to_the_desktop_trash_moves_to_the_drive_trash() {
+    let w = world(Duration::from_secs(60));
+    let docs = w.docs().await;
+    let (files, info) = trash_folders(&w).await;
+    // Written under a temporary name, then renamed (as GIO does).
+    let description = w.fs().create(info, "a.txt.trashinfo.TMP123").await.unwrap();
+    w.fs()
+        .write(description.attr.id, 0, b"[Trash Info]\nPath=...")
+        .unwrap();
+    w.fs()
+        .rename(info, "a.txt.trashinfo.TMP123", info, "a.txt.trashinfo")
+        .await
+        .unwrap();
+    assert!(
+        w.fs()
+            .lookup(info, "a.txt.trashinfo")
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    w.fs().rename(docs, "a.txt", files, "a.txt").await.unwrap();
+
+    assert_eq!(w.drive.trashed(), ["a"]);
+    assert!(w.fs().lookup(docs, "a.txt").await.unwrap().is_none());
+    // The file manager's trash view finds it.
+    assert!(w.fs().lookup(files, "a.txt").await.unwrap().is_some());
+    let root = w.fs().list(ROOT).await.unwrap();
+    assert!(root.iter().any(|e| e.name == ".Trash-1000"));
+    assert!(
+        w.drive.find("docs", "a.txt.trashinfo").is_none(),
+        "descriptions stay local"
+    );
+}
+
+#[tokio::test]
+async fn restoring_from_the_desktop_trash_restores_from_the_drive_trash() {
+    let w = world(Duration::ZERO);
+    let docs = w.docs().await;
+    let (files, _) = trash_folders(&w).await;
+    let trashed = w.fs().lookup(docs, "a.txt").await.unwrap().unwrap();
+    w.fs().rename(docs, "a.txt", files, "a.txt").await.unwrap();
+
+    w.fs().rename(files, "a.txt", docs, "a.txt").await.unwrap();
+
+    assert!(w.drive.has("a"));
+    assert!(w.fs().lookup(files, "a.txt").await.unwrap().is_none());
+    // The kernel keeps using the node it had: it must still be the file.
+    assert_eq!(w.read_all(trashed.attr.id).await, "0123456789abcdefghij");
+    assert_eq!(
+        w.read_all(w.node("a.txt").await).await,
+        "0123456789abcdefghij"
+    );
+}
+
+#[tokio::test]
+async fn emptying_the_desktop_trash_never_deletes_from_drive() {
+    let w = world(Duration::from_secs(60));
+    let docs = w.docs().await;
+    let (files, _) = trash_folders(&w).await;
+    w.fs().rename(docs, "a.txt", files, "a.txt").await.unwrap();
+
+    w.fs().unlink(files, "a.txt").await.unwrap();
+
+    // Still in the Drive trash, restorable for 30 days.
+    let trash = crate::use_cases::DriveTrash::new(&w.tokens, &w.drive, &w.settings);
+    let entries = trash.list(&w.account).await.unwrap();
+    assert!(entries.iter().any(|e| e.item.id.as_str() == "a"));
+}
+
+#[tokio::test]
+async fn only_the_trash_can_be_created_in_the_account_folder() {
+    let w = world(Duration::from_secs(60));
+    assert!(matches!(
+        w.fs().mkdir(ROOT, "Notes").await,
+        Err(StreamError::NotPermitted)
+    ));
+    let (files, _) = trash_folders(&w).await;
+    assert!(matches!(
+        w.fs().mkdir(files, "x").await,
+        Err(StreamError::NotPermitted)
+    ));
+}

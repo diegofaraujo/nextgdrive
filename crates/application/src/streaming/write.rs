@@ -111,6 +111,9 @@ where
     }
 
     pub async fn create(&self, dir: NodeId, name: &str) -> Result<Entry, StreamError> {
+        if let Some(result) = self.create_local(dir, name) {
+            return result;
+        }
         let parent = self.folder_of(dir)?;
         let file = StagedFile {
             key: self.new_key(),
@@ -151,6 +154,9 @@ where
     /// Prepares a file for writing: its content moves to the staging area
     /// (none of it if `truncate`).
     pub async fn open_write(&self, node: NodeId, truncate: bool) -> Result<(), StreamError> {
+        if self.resize_local(node, if truncate { 0 } else { u64::MAX }) {
+            return Ok(());
+        }
         let content = self
             .state
             .table()
@@ -229,6 +235,9 @@ where
 
     /// Writes into a file opened with [`open_write`](Self::open_write).
     pub fn write(&self, node: NodeId, offset: u64, data: &[u8]) -> Result<u32, StreamError> {
+        if let Some(written) = self.write_local(node, offset, data) {
+            return Ok(written);
+        }
         let key = self.staged_key(node)?;
         self.staging
             .write_at(&key, offset, data)
@@ -244,6 +253,9 @@ where
     }
 
     pub async fn set_len(&self, node: NodeId, len: u64) -> Result<(), StreamError> {
+        if self.resize_local(node, len) {
+            return Ok(());
+        }
         if self.staged_key(node).is_err() {
             self.open_write(node, len == 0).await?;
         }
@@ -268,6 +280,9 @@ where
     }
 
     pub async fn mkdir(&self, dir: NodeId, name: &str) -> Result<Entry, StreamError> {
+        if let Some(result) = self.mkdir_local(dir, name) {
+            return result;
+        }
         let parent = self.folder_of(dir)?;
         let token = self.tokens.access_token(self.account).await?;
         let item = self
@@ -293,6 +308,14 @@ where
     }
 
     pub async fn unlink(&self, dir: NodeId, name: &str) -> Result<(), StreamError> {
+        // Emptying the desktop trash only forgets its entries.
+        if self.local_dir(dir).is_some() {
+            return if self.remove_local(dir, name) {
+                Ok(())
+            } else {
+                Err(StreamError::NotFound)
+            };
+        }
         let entry = self.lookup(dir, name).await?.ok_or(StreamError::NotFound)?;
         let content = self
             .state
@@ -322,6 +345,15 @@ where
     }
 
     pub async fn rmdir(&self, dir: NodeId, name: &str) -> Result<(), StreamError> {
+        if self.local_dir(dir).is_some()
+            || (dir == super::ROOT && super::trash_dir::is_trash_name(name))
+        {
+            return if self.remove_local(dir, name) {
+                Ok(())
+            } else {
+                Err(StreamError::NotFound)
+            };
+        }
         let entry = self.lookup(dir, name).await?.ok_or(StreamError::NotFound)?;
         let content = self
             .state
@@ -349,6 +381,19 @@ where
         new_dir: NodeId,
         new_name: &str,
     ) -> Result<(), StreamError> {
+        match (self.local_dir(dir), self.local_dir(new_dir)) {
+            (None, Some(super::LocalDir::TrashFiles)) => {
+                return self.move_to_trash(dir, name, new_dir, new_name).await;
+            }
+            (Some(super::LocalDir::TrashFiles), None) => {
+                return self.restore_from_trash(dir, name, new_dir, new_name).await;
+            }
+            (None, None) => {}
+            // Within the desktop trash (e.g. a description written under a
+            // temporary name, then renamed): local only.
+            (Some(_), Some(_)) => return self.rename_local(dir, name, new_dir, new_name),
+            _ => return Err(StreamError::NotPermitted),
+        }
         let source = self.lookup(dir, name).await?.ok_or(StreamError::NotFound)?;
         let old_parent = self.folder_of(dir)?;
         let new_parent = self.folder_of(new_dir)?;
@@ -438,7 +483,11 @@ where
                 }
                 _ => return Err(StreamError::NotFound),
             },
-            Content::Root | Content::SharedDrives => return Err(StreamError::NotPermitted),
+            Content::Root
+            | Content::SharedDrives
+            | Content::Local(_)
+            | Content::TrashInfo(_)
+            | Content::Trashed { .. } => return Err(StreamError::NotPermitted),
         };
         // Replacing: what was there goes to the trash, where it can be restored.
         if let Some(target) = target {
@@ -639,7 +688,11 @@ where
         }
     }
 
-    async fn trash_item(&self, id: &DriveItemId, parent: &DriveItemId) -> Result<(), StreamError> {
+    pub(super) async fn trash_item(
+        &self,
+        id: &DriveItemId,
+        parent: &DriveItemId,
+    ) -> Result<(), StreamError> {
         let token = self.tokens.access_token(self.account).await?;
         let item = self.drive.item(&token, id).await.map_err(AppError::Drive)?;
         if item.capabilities.trash {
@@ -658,7 +711,7 @@ where
         Ok(())
     }
 
-    fn drop_staged(&self, key: &str) -> Result<(), StreamError> {
+    pub(super) fn drop_staged(&self, key: &str) -> Result<(), StreamError> {
         {
             let mut table = self.state.table();
             if let Some(staging) = table.staged.remove(key)
@@ -697,7 +750,7 @@ where
     }
 
     /// The Drive folder behind a node; only real folders can hold files.
-    fn folder_of(&self, dir: NodeId) -> Result<DriveItemId, StreamError> {
+    pub(super) fn folder_of(&self, dir: NodeId) -> Result<DriveItemId, StreamError> {
         match self.state.table().content(dir) {
             Some(Content::Folder(id)) => Ok(id),
             Some(Content::Root | Content::SharedDrives) => Err(StreamError::NotPermitted),
