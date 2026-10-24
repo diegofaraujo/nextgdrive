@@ -7,6 +7,10 @@ updates:
     groups:
       cargo:
         update-types: [minor, patch]
+    ignore:
+      # oo7, ksni and ashpd still use zbus 5; one copy of zbus until they move.
+      - dependency-name: zbus
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
