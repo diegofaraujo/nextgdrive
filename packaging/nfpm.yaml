@@ -46,7 +46,7 @@ contents:
     dst: /usr/share/licenses/nextgdrive/LICENSE
 
 # GTK >= 4.14 and libadwaita >= 1.5 (Ubuntu 24.04, Debian 13, Fedora 40 or
-# newer); fusermount3 for Stream mode.
+# newer); fusermount3 for Stream mode. Built on Ubuntu 24.04 (glibc 2.39).
 overrides:
   deb:
     depends:
@@ -55,8 +55,10 @@ overrides:
       - fuse3
     recommends:
       - gnome-keyring | org.freedesktop.secrets
+  # Libraries and files rather than package names, which differ between
+  # Fedora and openSUSE.
   rpm:
     depends:
-      - gtk4 >= 4.14
-      - libadwaita >= 1.5
-      - fuse3
+      - libgtk-4.so.1()(64bit)
+      - libadwaita-1.so.0()(64bit)
+      - /usr/bin/fusermount3
