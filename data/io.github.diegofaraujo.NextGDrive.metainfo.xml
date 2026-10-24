@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.diegofaraujo.NextGDrive</id>
+  <name>Next GDrive</name>
+  <summary>Sync or stream your Google Drive</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.diegofaraujo">
+    <name>Next GDrive contributors</name>
+  </developer>
+  <description>
+    <p>
+      Next GDrive keeps your Google Drive on your computer, for one or more Google accounts, with My Drive and shared drives.
+    </p>
+    <p>Each account works in one of two modes:</p>
+    <ul>
+      <li>Mirror: the folders you choose are copied to your computer and kept in sync in both directions.</li>
+      <li>Stream: the whole Drive appears in a folder and files are downloaded only when you open them. Files and folders can be kept available offline.</li>
+    </ul>
+    <p>
+      Nothing is deleted permanently: deleted files go to the Google Drive trash, which you can browse and restore from. When a file changes in two places, both versions are kept.
+    </p>
+    <p>
+      The app runs in the background with a tray icon and notifications, and everything it does is also available from the command line.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.diegofaraujo.NextGDrive.desktop</launchable>
+  <url type="homepage">https://github.com/diegofaraujo/nextgdrive</url>
+  <url type="bugtracker">https://github.com/diegofaraujo/nextgdrive/issues</url>
+  <url type="help">https://github.com/diegofaraujo/nextgdrive/discussions</url>
+  <url type="vcs-browser">https://github.com/diegofaraujo/nextgdrive</url>
+  <url type="contribute">https://github.com/diegofaraujo/nextgdrive/blob/main/CONTRIBUTING.md</url>
+  <url type="translate">https://github.com/diegofaraujo/nextgdrive/tree/main/crates/i18n/locales</url>
+  <provides>
+    <binary>nextgdrive</binary>
+    <binary>nextgdrive-gui</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <keywords>
+    <keyword>Google Drive</keyword>
+    <keyword>sync</keyword>
+    <keyword>cloud</keyword>
+  </keywords>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <internet>first-run</internet>
+  </requires>
+  <branding>
+    <color type="primary" scheme_preference="light">#8fd3fe</color>
+    <color type="primary" scheme_preference="dark">#0b3a75</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-24">
+      <description>
+        <p>First release.</p>
+        <ul>
+          <li>My Drive and shared drives, for multiple Google accounts</li>
+          <li>Mirror mode: two-way sync of chosen folders</li>
+          <li>Stream mode: the whole Drive on demand, with files available offline and a size-limited cache</li>
+          <li>Google Drive trash: deleted files go there and can be restored</li>
+          <li>Tray icon, notifications and start at login</li>
+          <li>Command-line interface</li>
+          <li>English, Portuguese (Brazil) and Spanish</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>
