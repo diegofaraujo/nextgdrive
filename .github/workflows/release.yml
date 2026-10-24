@@ -1,0 +1,237 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds the packages and publishes the release (see
+# CONTRIBUTING.md → Releases). Otherwise (by hand, or in a pull request) it
+# only builds them, as workflow artifacts, without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  # Packaging changes are built in their pull request too.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - data/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NFPM_VERSION: 2.48.0
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match version ${version} in Cargo.toml"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            package_arch: amd64
+            linuxdeploy_sha256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+            plugin_appimage_sha256: 992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3
+            nfpm_sha256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            package_arch: arm64
+            linuxdeploy_sha256: 620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+            plugin_appimage_sha256: 83c292149274965a865dcd44c135cfca8ba28c6b7de3eb628d4b8b5f248af17c
+            nfpm_sha256: a9a75213763783b7669719e505474c748c5ad7dc66591a195619deb50f85c2f4
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ARCH: ${{ matrix.package_arch }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev librsvg2-common file desktop-file-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Build
+        env:
+          # Embedded as the default OAuth client (ClientConfig::embedded).
+          NEXTGDRIVE_CLIENT_ID: ${{ secrets.NEXTGDRIVE_CLIENT_ID }}
+          NEXTGDRIVE_CLIENT_SECRET: ${{ secrets.NEXTGDRIVE_CLIENT_SECRET }}
+        run: |
+          if [ -z "${NEXTGDRIVE_CLIENT_ID}" ] && [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "::error::A release needs the NEXTGDRIVE_CLIENT_ID and NEXTGDRIVE_CLIENT_SECRET secrets"
+            exit 1
+          fi
+          cargo build --release --locked
+      - name: Download packaging tools
+        run: |
+          mkdir -p tools && cd tools
+          nfpm_arch=$([ "${{ matrix.arch }}" = x86_64 ] && echo x86_64 || echo arm64)
+          curl -fsSLo nfpm.tar.gz "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz"
+          curl -fsSLo linuxdeploy-${{ matrix.arch }}.AppImage \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-${{ matrix.arch }}.AppImage"
+          curl -fsSLo linuxdeploy-plugin-appimage-${{ matrix.arch }}.AppImage \
+            "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-${{ matrix.arch }}.AppImage"
+          curl -fsSLo linuxdeploy-plugin-gtk.sh \
+            "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh"
+          sha256sum -c <<SUMS
+          ${{ matrix.nfpm_sha256 }}  nfpm.tar.gz
+          ${{ matrix.linuxdeploy_sha256 }}  linuxdeploy-${{ matrix.arch }}.AppImage
+          ${{ matrix.plugin_appimage_sha256 }}  linuxdeploy-plugin-appimage-${{ matrix.arch }}.AppImage
+          b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171  linuxdeploy-plugin-gtk.sh
+          SUMS
+          tar xzf nfpm.tar.gz nfpm
+          chmod +x nfpm *.AppImage linuxdeploy-plugin-gtk.sh
+      - name: Package .deb and .rpm
+        run: |
+          mkdir -p dist
+          tools/nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+          tools/nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+      - name: Package AppImage
+        run: |
+          mkdir -p appimage-tools
+          mv tools/*.AppImage tools/linuxdeploy-plugin-gtk.sh appimage-tools/
+          packaging/appimage.sh "${VERSION}" "${{ matrix.arch }}" appimage-tools
+      - name: Package .tar.gz
+        run: |
+          name="nextgdrive-${VERSION}-${{ matrix.arch }}-linux"
+          app=io.github.diegofaraujo.NextGDrive
+          install -Dm755 -t "staging/${name}/bin" target/release/nextgdrive target/release/nextgdrive-gui
+          install -Dm644 "data/${app}.desktop" "staging/${name}/share/applications/${app}.desktop"
+          install -Dm644 "data/${app}.metainfo.xml" "staging/${name}/share/metainfo/${app}.metainfo.xml"
+          for icon in data/icons/hicolor/*/apps/${app}.png; do
+            install -Dm644 "${icon}" "staging/${name}/share/${icon#data/}"
+          done
+          install -Dm644 -t "staging/${name}" LICENSE README.md
+          tar -C staging -czf "dist/${name}.tar.gz" "${name}"
+      - name: Check the packages
+        env:
+          NEXTGDRIVE_CLIENT_ID: ${{ secrets.NEXTGDRIVE_CLIENT_ID }}
+        run: |
+          ls -la dist
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb | grep -q usr/bin/nextgdrive-gui
+          file dist/*.AppImage | grep -q ELF
+          if [ -n "${NEXTGDRIVE_CLIENT_ID}" ]; then
+            grep -q -F "${NEXTGDRIVE_CLIENT_ID}" target/release/nextgdrive-gui
+            echo "The project's OAuth client is embedded."
+          else
+            echo "::warning::No OAuth client embedded (secrets not available): fine for a test build only."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  install:
+    name: Install on ${{ matrix.image }} (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "ubuntu:24.04", arch: x86_64, runner: ubuntu-24.04, kind: deb }
+          - { image: "debian:13", arch: x86_64, runner: ubuntu-24.04, kind: deb }
+          - { image: "fedora:latest", arch: x86_64, runner: ubuntu-24.04, kind: rpm }
+          - { image: "opensuse/tumbleweed", arch: x86_64, runner: ubuntu-24.04, kind: rpm }
+          - { image: "ubuntu:24.04", arch: aarch64, runner: ubuntu-24.04-arm, kind: deb }
+          - { image: "fedora:latest", arch: aarch64, runner: ubuntu-24.04-arm, kind: rpm }
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}
+          path: dist
+      # The package manager must resolve every dependency, the command line
+      # must run, and every library the app links must be found.
+      - name: Install
+        run: |
+          case "${{ matrix.kind }}:${{ matrix.image }}" in
+            deb:*) apt-get update && apt-get install -y ./dist/*.deb ;;
+            rpm:fedora*) dnf install -y ./dist/*.rpm ;;
+            rpm:opensuse*) zypper --non-interactive install --allow-unsigned-rpm ./dist/*.rpm ;;
+          esac
+      - name: Run
+        run: |
+          nextgdrive --version
+          nextgdrive account list
+          if ldd /usr/bin/nextgdrive-gui | grep "not found"; then exit 1; fi
+          test -f /usr/share/applications/io.github.diegofaraujo.NextGDrive.desktop
+
+  publish:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: [version, build, install]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${VERSION}" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found && /^\[.*\]: / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF2'
+
+          ## Install
+
+          | Distribution | File |
+          |---|---|
+          | Ubuntu 24.04+, Debian 13+, Pop!_OS | `.deb`: `sudo apt install ./nextgdrive_*.deb` |
+          | Fedora, openSUSE | `.rpm`: `sudo dnf install ./nextgdrive-*.rpm` |
+          | Any distribution | `.AppImage`: make it executable and run it |
+          | Manual | `.tar.gz`: copy `bin/` and `share/` into `~/.local/` |
+
+          `x86_64` is for most PCs; `aarch64`/`arm64` for ARM computers. Verify downloads with `sha256sum -c SHA256SUMS`, or their provenance with `gh attestation verify <file> -R ${{ github.repository }}`.
+          EOF2
+          cat notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=$(case "${VERSION}" in *-*) echo --prerelease ;; esac)
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "Next GDrive ${VERSION}" \
+            --notes-file notes.md \
+            --generate-notes \
+            --verify-tag ${prerelease}
