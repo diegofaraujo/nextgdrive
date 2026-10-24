@@ -92,6 +92,9 @@ stream-pending = { $count ->
 kept-files-label = kept files
 mode-kept-files = Files that existed only on this computer were moved to { $path }.
 
+offline-complete = { $total }, on this computer
+offline-progress = { $cached } of { $total } downloaded
+
 ## CLI
 
 cli-about = Sync your Google Drive accounts with local folders.
@@ -165,6 +168,16 @@ cli-config-mode-value = "mirror" or "stream"
 cli-mode-stream = { $email } now streams its whole Google Drive in its folder.
 cli-mode-mirror = { $email } now mirrors selected folders. Choose them with "nextgdrive sync select".
 cli-stream-already-mounted = { $email } is already streamed by the Next GDrive running in the background, in its folder.
+cli-offline-about = Keep streamed files and folders on this computer, to use them without internet
+cli-offline-add-about = Make a file or folder available offline
+cli-offline-remove-about = Stop keeping a file or folder offline (it stays in Google Drive)
+cli-offline-list-about = List what is available offline
+cli-offline-path = Path inside a streamed account's folder, e.g. ~/GoogleDrive/you@gmail.com/My Drive/Docs
+cli-offline-added = “{ $name }” will be kept on this computer. It is downloaded in the background.
+cli-offline-removed = “{ $name }” is no longer kept offline.
+cli-offline-empty = Nothing is available offline.
+cli-offline-outside = { $path } is not inside the folder of a linked account.
+cli-offline-not-streamed = { $email } mirrors its folders, which are always on this computer; offline applies to streamed accounts.
 
 ## GUI
 
@@ -271,6 +284,13 @@ gui-mode-mirror-title = Mirror Selected Folders?
 gui-mode-mirror-body = The account folder will hold copies of the folders you choose, kept in sync and available offline. Choose them in Folders to Sync.
 gui-mode-mirror-action = Mirror
 gui-mode-switched = Mode changed.
+gui-offline = Available Offline
+gui-offline-subtitle = Files and folders kept on this computer, to use without internet
+gui-offline-description = These are downloaded in full and kept up to date. Everything else is downloaded only when opened.
+gui-offline-empty = Nothing yet. Add files or folders with the buttons above.
+gui-offline-add-file = Add a File
+gui-offline-add-folder = Add a Folder
+gui-offline-remove = Stop keeping offline
 
 ## Errors
 

@@ -198,8 +198,8 @@ pub struct FakeDrive {
 struct DriveState {
     items: BTreeMap<DriveItemId, DriveItem>,
     contents: BTreeMap<DriveItemId, Vec<u8>>,
-    /// Folder whose listing fails, to simulate API errors.
-    failing: Option<DriveItemId>,
+    /// Folders whose listing fails, to simulate API errors.
+    failing: HashSet<DriveItemId>,
     /// File whose download returns content that does not match its MD5.
     corrupt: Option<DriveItemId>,
     clock: u64,
@@ -361,7 +361,7 @@ impl FakeDrive {
     }
 
     pub fn fail_listing(&self, folder: &str) {
-        self.state().failing = Some(DriveItemId::new(folder));
+        self.state().failing.insert(DriveItemId::new(folder));
     }
 
     pub fn corrupt_download(&self, id: &str) {
@@ -445,7 +445,7 @@ impl DriveService for FakeDrive {
     ) -> Result<Vec<DriveItem>, PortError> {
         Self::check(token)?;
         let state = self.state();
-        if state.failing.as_ref() == Some(folder) {
+        if state.failing.contains(folder) {
             return Err(PortError::new("listing failed"));
         }
         Ok(state
@@ -1051,6 +1051,13 @@ impl BlockCache for InMemoryBlocks {
         self.0.lock().unwrap().insert(key.clone(), data.to_vec());
         Ok(())
     }
+
+    fn contains(&self, key: &BlockKey) -> bool {
+        self.0.lock().unwrap().contains_key(key)
+    }
+
+    /// Nothing is ever evicted here, so pinning changes nothing.
+    fn pin(&self, _: &[(DriveItemId, String)]) {}
 }
 
 /// Staging area in memory.

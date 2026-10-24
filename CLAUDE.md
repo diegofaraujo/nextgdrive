@@ -100,6 +100,8 @@ Streaming writes (`streaming/write.rs`) follow sync's rules: content goes to the
 
 Desktop trash (`streaming/trash_dir.rs`): file managers "move to trash" by creating `<mount>/.Trash-<uid>/{files,info}`, writing `info/<name>.trashinfo` (under a temporary name, then renamed) and renaming the item into `files/`. Those folders exist only in memory (`Content::Local`, mode 0700 as the spec requires); renaming into `files/` trashes the item in Drive, renaming out restores it from the Drive trash, and deleting entries there (emptying the trash) only forgets them — Drive purges after 30 days. Both moves keep the node id: the kernel keeps using the moved inode under its new name. trash-rs (COSMIC Files) first creates an empty placeholder in `files/` (a file, or an empty folder for a folder) and renames over it; GIO writes the description under a temporary name and renames it: both are supported, and each has a test. Only the trash may be created in the account folder itself.
 
+Offline (`use_cases/offline.rs`): items of a streamed account kept in full. `Offline` resolves a path inside the account folder to a Drive item (same naming as the streamed tree), walks offline folders, and downloads missing blocks with the **same `BlockKey`s and block size as streaming** (a test proves the streamed folder then reads them without any request). The host's offline task, each round: pins every offline file at its current version (`BlockCache::pin`: never evicted, not counted toward the limit; old versions unpin and age out), downloads what is missing, and `preload`s the folders in the mount so they can be browsed without internet. Without Drive, `StreamingDrive::list` falls back to the last listing. Check it end to end by sending the daemon through a local HTTPS proxy (`HTTPS_PROXY`) and killing the proxy.
+
 Locking rule for `StreamState::table()` (a `std::sync::Mutex`): never call it in an `if let`/`match` condition whose body locks again. Temporaries in those conditions live until the end of the block, so the second lock deadlocks (this happened). Take the value into a `let` first.
 
 ### Google OAuth client
@@ -124,7 +126,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, config mode, sync run|folders|select|deselect, trash list|restore, stream
+cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, config mode, sync run|folders|select|deselect, trash list|restore, stream, offline add|remove|list
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 

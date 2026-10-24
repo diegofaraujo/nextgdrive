@@ -18,4 +18,12 @@ pub trait BlockCache: Sync {
     fn get(&self, key: &BlockKey) -> Result<Option<Vec<u8>>, PortError>;
 
     fn put(&self, key: &BlockKey, data: &[u8]) -> Result<(), PortError>;
+
+    /// Whether the block is cached, without reading it.
+    fn contains(&self, key: &BlockKey) -> bool;
+
+    /// Files (at these versions) made available offline: their blocks are
+    /// never evicted, and do not count toward the cache limit. Replaces the
+    /// previous set.
+    fn pin(&self, files: &[(DriveItemId, String)]);
 }

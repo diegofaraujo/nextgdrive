@@ -243,6 +243,28 @@ impl Services {
 }
 
 impl Services {
+    /// `cache` is the shared block cache (see [`stream::open_cache`]).
+    pub fn offline<'a>(
+        &'a self,
+        cache: &'a nextgdrive_adapter_cache::DiskBlockCache,
+    ) -> nextgdrive_application::use_cases::Offline<
+        'a,
+        GoogleAuthenticator,
+        KeyringCredentialStore,
+        GoogleDrive,
+        nextgdrive_adapter_cache::DiskBlockCache,
+        TomlSettingsRepository,
+    > {
+        let block_size = nextgdrive_application::streaming::StreamConfig::default().block_size;
+        nextgdrive_application::use_cases::Offline::new(
+            &self.tokens,
+            &self.drive,
+            cache,
+            &self.local.settings,
+            block_size,
+        )
+    }
+
     pub fn drive_trash(
         &self,
     ) -> DriveTrash<

@@ -12,7 +12,7 @@ use nextgdrive_domain::{Account, SyncMode};
 use nextgdrive_i18n::FluentValue;
 
 use crate::ctx::{Ctx, keep_alive, navigation_page, spawn};
-use crate::{folders_page, trash_page};
+use crate::{folders_page, offline_page, trash_page};
 
 /// One account: storage, what is synced, and syncing on demand.
 struct AccountPage {
@@ -27,6 +27,7 @@ struct AccountPage {
     progress_bar: gtk::ProgressBar,
     open_row: adw::ActionRow,
     mode_row: adw::ComboRow,
+    offline_row: adw::ActionRow,
     /// Set while the page itself changes `mode_row`, so it is not taken as
     /// the user switching modes.
     setting_mode: Cell<bool>,
@@ -84,11 +85,18 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
         .title(i18n.tr("gui-mode"))
         .model(&modes)
         .build();
+    let offline_row = adw::ActionRow::builder()
+        .title(i18n.tr("gui-offline"))
+        .subtitle(i18n.tr("gui-offline-subtitle"))
+        .activatable(true)
+        .build();
+    offline_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
     let sync = adw::PreferencesGroup::builder()
         .title(i18n.tr("gui-sync-group"))
         .build();
     sync.add(&mode_row);
     sync.add(&folders_row);
+    sync.add(&offline_row);
     sync.add(&sync_row);
     sync.add(&progress_row);
     sync.add(&open_row);
@@ -123,6 +131,7 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
         progress_bar,
         open_row,
         mode_row,
+        offline_row,
         setting_mode: Cell::new(false),
         report_group: RefCell::new(report_group),
         page,
@@ -146,6 +155,16 @@ pub fn build(ctx: &Rc<Ctx>, account: Account) -> adw::NavigationPage {
         if let Some(state) = weak.upgrade() {
             state.open_folder();
         }
+    });
+    let weak = Rc::downgrade(&state);
+    state.offline_row.connect_activated(move |_| {
+        let Some(state) = weak.upgrade() else { return };
+        let Some(dir) = state.account_dir() else {
+            return;
+        };
+        state
+            .ctx
+            .push(&offline_page::build(&state.ctx, state.account.clone(), dir));
     });
     // The row belongs to the page, so the closure may only hold a `Weak`.
     let weak = Rc::downgrade(&state);
@@ -211,6 +230,7 @@ impl AccountPage {
         for row in [&self.folders_row, &self.sync_row] {
             row.set_visible(!streaming);
         }
+        self.offline_row.set_visible(streaming);
         let count = settings.selection(&self.account.id).count();
         self.folders_row.set_subtitle(
             &i18n.tr_args("gui-folders-count", [("count", FluentValue::from(count))]),

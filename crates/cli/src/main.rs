@@ -19,7 +19,7 @@ use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email, SyncMode};
 use nextgdrive_i18n::{FluentValue, Localizer};
 
-use cli::{AccountCommand, Command, ConfigCommand, SyncCommand, TrashCommand};
+use cli::{AccountCommand, Command, ConfigCommand, OfflineCommand, SyncCommand, TrashCommand};
 
 fn main() -> ExitCode {
     let i18n = Localizer::from_system();
@@ -46,6 +46,7 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     let app_error = |e: AppError| i18n.app_error(&e);
     match command {
         Command::Daemon => daemon(i18n).await?,
+        Command::Offline(command) => offline(i18n, command).await?,
         Command::Stream { email, mountpoint } => stream(i18n, &email, &mountpoint).await?,
         Command::Trash(TrashCommand::List { email }) => {
             let services = Services::new(i18n).await?;
@@ -568,6 +569,105 @@ async fn stream(i18n: &Localizer, email: &str, mountpoint: &std::path::Path) -> 
     }
     drop(mount);
     println!("{}", i18n.tr("cli-stream-unmounted"));
+    Ok(())
+}
+
+/// Offline items: given by their path inside a streamed account's folder.
+async fn offline(i18n: &Localizer, command: OfflineCommand) -> Result<(), String> {
+    let services = Services::new(i18n).await?;
+    let settings = services
+        .local
+        .get_settings()
+        .execute()
+        .map_err(|e| i18n.app_error(&e))?;
+    let cache = nextgdrive_composition::stream::open_cache(i18n, settings.cache_limit)?;
+    let offline = services.offline(&cache);
+    let accounts = services
+        .local
+        .list_accounts()
+        .execute()
+        .map_err(|e| i18n.app_error(&e))?;
+    // Which streamed account a path is in, and where inside it.
+    let locate = |path: &std::path::Path| -> Result<(Account, std::path::PathBuf), String> {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+        for account in &accounts {
+            if let Ok(rest) = path.strip_prefix(settings.account_dir(account)) {
+                if settings.mode(&account.id) != SyncMode::Stream {
+                    return Err(i18n.tr_args(
+                        "cli-offline-not-streamed",
+                        [("email", account.email.to_string().into())],
+                    ));
+                }
+                return Ok((account.clone(), rest.to_owned()));
+            }
+        }
+        Err(i18n.tr_args(
+            "cli-offline-outside",
+            [("path", path.display().to_string().into())],
+        ))
+    };
+    let wake = || async {
+        // The background process downloads (or releases) on its next round.
+        if let Some(client) = Client::connect().await {
+            let _ = client.sync_now().await;
+        }
+    };
+    match command {
+        OfflineCommand::Add { path } => {
+            let (account, relative) = locate(&path)?;
+            let item = offline
+                .add(&account, &relative)
+                .await
+                .map_err(|e| i18n.app_error(&e))?;
+            println!(
+                "{}",
+                i18n.tr_args("cli-offline-added", [("name", item.name.into())])
+            );
+            wake().await;
+        }
+        OfflineCommand::Remove { path } => {
+            let (account, relative) = locate(&path)?;
+            let item = offline
+                .remove_path(&account, &relative)
+                .await
+                .map_err(|e| i18n.app_error(&e))?;
+            println!(
+                "{}",
+                i18n.tr_args("cli-offline-removed", [("name", item.name.into())])
+            );
+            wake().await;
+        }
+        OfflineCommand::List => {
+            let mut any = false;
+            for account in accounts
+                .iter()
+                .filter(|a| settings.mode(&a.id) == SyncMode::Stream)
+            {
+                for item in offline
+                    .status(account)
+                    .await
+                    .map_err(|e| i18n.app_error(&e))?
+                {
+                    any = true;
+                    let progress = i18n.tr_args(
+                        if item.complete() {
+                            "offline-complete"
+                        } else {
+                            "offline-progress"
+                        },
+                        [
+                            ("cached", i18n.bytes(item.bytes_cached).into()),
+                            ("total", i18n.bytes(item.bytes_total).into()),
+                        ],
+                    );
+                    println!("{}  {}  ({progress})", account.email, item.item.name);
+                }
+            }
+            if !any {
+                println!("{}", i18n.tr("cli-offline-empty"));
+            }
+        }
+    }
     Ok(())
 }
 

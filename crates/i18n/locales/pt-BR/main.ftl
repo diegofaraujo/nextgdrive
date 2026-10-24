@@ -92,6 +92,9 @@ stream-pending = { $count ->
 kept-files-label = arquivos mantidos
 mode-kept-files = Os arquivos que só existiam neste computador foram movidos para { $path }.
 
+offline-complete = { $total }, neste computador
+offline-progress = { $cached } de { $total } baixados
+
 ## CLI
 
 cli-about = Sincronize suas contas do Google Drive com pastas locais.
@@ -165,6 +168,16 @@ cli-config-mode-value = "mirror" (espelhar) ou "stream" (transmitir)
 cli-mode-stream = { $email } agora transmite todo o Google Drive na pasta dela.
 cli-mode-mirror = { $email } agora espelha as pastas selecionadas. Escolha-as com "nextgdrive sync select".
 cli-stream-already-mounted = { $email } já é transmitida na pasta dela pelo Next GDrive em segundo plano.
+cli-offline-about = Manter arquivos e pastas transmitidos neste computador, para usá-los sem internet
+cli-offline-add-about = Deixar um arquivo ou pasta disponível offline
+cli-offline-remove-about = Deixar de manter um arquivo ou pasta offline (continua no Google Drive)
+cli-offline-list-about = Listar o que está disponível offline
+cli-offline-path = Caminho dentro da pasta de uma conta transmitida, ex.: ~/GoogleDrive/voce@gmail.com/Meu Drive/Docs
+cli-offline-added = “{ $name }” será mantido neste computador. O download acontece em segundo plano.
+cli-offline-removed = “{ $name }” não é mais mantido offline.
+cli-offline-empty = Nada está disponível offline.
+cli-offline-outside = { $path } não está dentro da pasta de uma conta vinculada.
+cli-offline-not-streamed = { $email } espelha as pastas, que estão sempre neste computador; o modo offline vale para contas transmitidas.
 
 ## GUI
 
@@ -271,6 +284,13 @@ gui-mode-mirror-title = Espelhar pastas selecionadas?
 gui-mode-mirror-body = A pasta da conta vai guardar cópias das pastas que você escolher, sincronizadas e disponíveis offline. Escolha-as em Pastas para sincronizar.
 gui-mode-mirror-action = Espelhar
 gui-mode-switched = Modo alterado.
+gui-offline = Disponível offline
+gui-offline-subtitle = Arquivos e pastas mantidos neste computador, para usar sem internet
+gui-offline-description = Eles são baixados por inteiro e mantidos atualizados. O resto só é baixado quando aberto.
+gui-offline-empty = Nada ainda. Adicione arquivos ou pastas com os botões acima.
+gui-offline-add-file = Adicionar um arquivo
+gui-offline-add-folder = Adicionar uma pasta
+gui-offline-remove = Deixar de manter offline
 
 ## Errors
 

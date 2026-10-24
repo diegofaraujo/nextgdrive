@@ -4,6 +4,7 @@
 //! refreshes its modification time, which eviction uses to drop what was
 //! used least recently once the cache grows past its limit.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use nextgdrive_application::ports::{BlockCache, BlockKey, PortError};
+use nextgdrive_domain::DriveItemId;
 
 pub struct DiskBlockCache {
     root: PathBuf,
@@ -20,6 +22,11 @@ pub struct DiskBlockCache {
     used: AtomicU64,
     /// Only one eviction at a time.
     evicting: Mutex<()>,
+    /// `<file>/<version>` folders of files available offline: never evicted.
+    pinned: Mutex<HashSet<PathBuf>>,
+    /// Bytes of pinned blocks, as of the last eviction scan. They do not
+    /// count toward the limit.
+    pinned_bytes: AtomicU64,
 }
 
 /// File ids and versions become path components: keep only safe characters.
@@ -73,6 +80,8 @@ impl DiskBlockCache {
             limit,
             used: AtomicU64::new(used),
             evicting: Mutex::new(()),
+            pinned: Mutex::default(),
+            pinned_bytes: AtomicU64::new(0),
         })
     }
 
@@ -81,24 +90,43 @@ impl DiskBlockCache {
     }
 
     fn path(&self, key: &BlockKey) -> PathBuf {
-        self.root
-            .join(component(key.file.as_str()))
-            .join(component(&key.version))
+        self.version_dir(&key.file, &key.version)
             .join(key.index.to_string())
+    }
+
+    fn version_dir(&self, file: &DriveItemId, version: &str) -> PathBuf {
+        self.root
+            .join(component(file.as_str()))
+            .join(component(version))
+    }
+
+    /// Bytes that count toward the limit.
+    fn evictable(&self) -> u64 {
+        self.used()
+            .saturating_sub(self.pinned_bytes.load(Ordering::Relaxed))
     }
 
     fn evict(&self) {
         let Ok(_guard) = self.evicting.try_lock() else {
             return;
         };
-        if self.used() <= self.limit {
+        let pinned = self.pinned.lock().map(|p| p.clone()).unwrap_or_default();
+        let is_pinned = |path: &Path| path.parent().is_some_and(|dir| pinned.contains(dir));
+        let mut all = blocks(&self.root);
+        let pinned_bytes = all
+            .iter()
+            .filter(|(_, _, p)| is_pinned(p))
+            .map(|(_, size, _)| size)
+            .sum();
+        self.pinned_bytes.store(pinned_bytes, Ordering::Relaxed);
+        if self.evictable() <= self.limit {
             return;
         }
         let target = self.limit / 10 * 9;
-        let mut all = blocks(&self.root);
+        all.retain(|(_, _, path)| !is_pinned(path));
         all.sort();
         for (_, size, path) in all {
-            if self.used() <= target {
+            if self.evictable() <= target {
                 break;
             }
             if fs::remove_file(&path).is_ok() {
@@ -140,10 +168,26 @@ impl BlockCache for DiskBlockCache {
         self.used
             .fetch_sub(previous.min(self.used()), Ordering::Relaxed);
         self.used.fetch_add(data.len() as u64, Ordering::Relaxed);
-        if self.used() > self.limit {
+        if self.evictable() > self.limit {
             self.evict();
         }
         Ok(())
+    }
+
+    fn contains(&self, key: &BlockKey) -> bool {
+        self.path(key).is_file()
+    }
+
+    fn pin(&self, files: &[(DriveItemId, String)]) {
+        let dirs = files
+            .iter()
+            .map(|(file, version)| self.version_dir(file, version))
+            .collect();
+        if let Ok(mut pinned) = self.pinned.lock() {
+            *pinned = dirs;
+        }
+        // Recount what is pinned, and trim if unpinning left too much.
+        self.evict();
     }
 }
 
@@ -198,6 +242,28 @@ mod tests {
         assert!(cache.get(&key("used", 0)).unwrap().is_none());
         assert!(cache.get(&key("old", 0)).unwrap().is_some());
         assert!(cache.get(&key("new", 0)).unwrap().is_some());
+    }
+
+    #[test]
+    fn pinned_files_are_never_evicted_and_do_not_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = DiskBlockCache::open(dir.path(), 100).unwrap();
+        cache.put(&key("offline", 0), &[0; 80]).unwrap();
+        cache.pin(&[(DriveItemId::new("offline"), "md5".into())]);
+        std::thread::sleep(Duration::from_millis(20));
+
+        // 80 pinned + 90 more is past the limit only if pinned counted.
+        cache.put(&key("a", 0), &[0; 45]).unwrap();
+        cache.put(&key("b", 0), &[0; 45]).unwrap();
+        assert!(cache.contains(&key("a", 0)) && cache.contains(&key("b", 0)));
+
+        cache.put(&key("c", 0), &[0; 45]).unwrap();
+        assert!(cache.contains(&key("offline", 0)), "pinned blocks stay");
+        assert!(!cache.contains(&key("a", 0)), "oldest unpinned block goes");
+
+        // Unpinned, it is an ordinary (old) block again.
+        cache.pin(&[]);
+        assert!(!cache.contains(&key("offline", 0)));
     }
 
     #[test]

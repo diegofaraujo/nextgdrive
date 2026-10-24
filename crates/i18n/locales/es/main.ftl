@@ -92,6 +92,9 @@ stream-pending = { $count ->
 kept-files-label = archivos conservados
 mode-kept-files = Los archivos que solo existían en este equipo se movieron a { $path }.
 
+offline-complete = { $total }, en este equipo
+offline-progress = { $cached } de { $total } descargados
+
 ## CLI
 
 cli-about = Sincroniza tus cuentas de Google Drive con carpetas locales.
@@ -165,6 +168,16 @@ cli-config-mode-value = "mirror" (reflejar) o "stream" (transmitir)
 cli-mode-stream = { $email } ahora transmite todo su Google Drive en su carpeta.
 cli-mode-mirror = { $email } ahora refleja las carpetas seleccionadas. Elígelas con "nextgdrive sync select".
 cli-stream-already-mounted = { $email } ya se transmite en su carpeta desde el Next GDrive en segundo plano.
+cli-offline-about = Conservar archivos y carpetas transmitidos en este equipo, para usarlos sin internet
+cli-offline-add-about = Hacer que un archivo o carpeta esté disponible sin conexión
+cli-offline-remove-about = Dejar de conservar un archivo o carpeta sin conexión (sigue en Google Drive)
+cli-offline-list-about = Listar lo que está disponible sin conexión
+cli-offline-path = Ruta dentro de la carpeta de una cuenta transmitida, p. ej. ~/GoogleDrive/tu@gmail.com/Mi unidad/Docs
+cli-offline-added = «{ $name }» se conservará en este equipo. Se descarga en segundo plano.
+cli-offline-removed = «{ $name }» ya no se conserva sin conexión.
+cli-offline-empty = No hay nada disponible sin conexión.
+cli-offline-outside = { $path } no está dentro de la carpeta de una cuenta vinculada.
+cli-offline-not-streamed = { $email } refleja sus carpetas, que siempre están en este equipo; el modo sin conexión es para cuentas transmitidas.
 
 ## GUI
 
@@ -271,6 +284,13 @@ gui-mode-mirror-title = ¿Reflejar carpetas seleccionadas?
 gui-mode-mirror-body = La carpeta de la cuenta guardará copias de las carpetas que elijas, sincronizadas y disponibles sin conexión. Elígelas en Carpetas para sincronizar.
 gui-mode-mirror-action = Reflejar
 gui-mode-switched = Modo cambiado.
+gui-offline = Disponible sin conexión
+gui-offline-subtitle = Archivos y carpetas conservados en este equipo, para usarlos sin internet
+gui-offline-description = Se descargan por completo y se mantienen actualizados. Lo demás solo se descarga al abrirlo.
+gui-offline-empty = Nada todavía. Añade archivos o carpetas con los botones de arriba.
+gui-offline-add-file = Añadir un archivo
+gui-offline-add-folder = Añadir una carpeta
+gui-offline-remove = Dejar de conservar sin conexión
 
 ## Errors
 
