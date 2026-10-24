@@ -26,6 +26,19 @@
 - **Command-line interface** with the same features, for headless setups and scripting.
 - **Multilingual**: English, Portuguese (Brazil), and Spanish.
 
+## Installing
+
+Download the package for your system from the [latest release](https://github.com/diegofaraujo/nextgdrive/releases/latest), for `x86_64` (most PCs) or `aarch64`/`arm64` (ARM computers):
+
+| System | Package |
+|---|---|
+| Ubuntu 24.04+, Debian 13+, Pop!_OS | `.deb`: `sudo apt install ./nextgdrive_*.deb` |
+| Fedora, openSUSE | `.rpm`: `sudo dnf install ./nextgdrive-*.rpm` |
+| Any distribution | `.AppImage` (graphical app only): make it executable and run it |
+| Manual | `.tar.gz`: copy its `bin/` and `share/` into `~/.local/` |
+
+Releases work out of the box: no Google Cloud setup is needed. While the app awaits Google's verification, sign-in shows an "unverified app" warning (choose *Advanced → Go to Next GDrive*), and the number of users is limited; you can also use [your own OAuth client](#google-oauth-client).
+
 ## Building from source
 
 Requirements: Rust 1.92 or newer, and the GTK 4 (≥ 4.14) and libadwaita (≥ 1.5) development packages. On Ubuntu or Pop!_OS 24.04:
@@ -48,7 +61,7 @@ scripts/install-user.sh --uninstall
 
 ### Google OAuth client
 
-Next GDrive does not ship Google API credentials yet, so you need your own OAuth client:
+Builds from source have no Google API credentials, so you need your own OAuth client (release packages include the project's, but yours takes precedence when set up):
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
 2. Under **Google Auth Platform**, configure the consent screen with audience **External**, and add your Google accounts as **test users**.

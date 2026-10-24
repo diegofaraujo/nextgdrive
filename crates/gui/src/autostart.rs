@@ -30,7 +30,12 @@ pub fn set_enabled(enabled: bool) -> io::Result<()> {
             result => result,
         };
     }
-    let exe = std::env::current_exe()?;
+    // An AppImage runs from a mount that is gone after it exits: start the
+    // AppImage file itself.
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(appimage) => PathBuf::from(appimage),
+        None => std::env::current_exe()?,
+    };
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
