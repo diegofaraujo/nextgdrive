@@ -46,7 +46,7 @@ fn entry(exe: &str) -> String {
         .replace('$', "\\\\$");
     format!(
         "[Desktop Entry]\nType=Application\nName=Next GDrive\nExec=\"{quoted}\" {BACKGROUND_FLAG}\n\
-         Icon=folder-remote\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n"
+         Icon={APP_ID}\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n"
     )
 }
 

@@ -43,6 +43,7 @@ pub fn build(ctx: &Rc<Ctx>) -> adw::NavigationPage {
         Some(&i18n.tr("gui-preferences")),
         Some("accounts.preferences"),
     );
+    menu.append(Some(&i18n.tr("gui-about")), Some("accounts.about"));
     header.pack_end(
         &gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
@@ -69,6 +70,14 @@ pub fn build(ctx: &Rc<Ctx>) -> adw::NavigationPage {
         }
     });
     actions.add_action(&preferences);
+    let about = gio::SimpleAction::new("about", None);
+    let weak = Rc::downgrade(&page);
+    about.connect_activate(move |_, _| {
+        if let Some(page) = weak.upgrade() {
+            present_about(&page.ctx);
+        }
+    });
+    actions.add_action(&about);
     root.insert_action_group("accounts", Some(&actions));
 
     let weak = Rc::downgrade(&page);
@@ -99,7 +108,7 @@ impl AccountsPage {
                 &i18n.app_error(&e),
             ),
             Ok(list) if list.is_empty() => self.show_status(
-                "folder-remote-symbolic",
+                crate::APP_ID,
                 &i18n.tr("gui-no-accounts-title"),
                 &i18n.tr("gui-no-accounts-description"),
             ),
@@ -304,4 +313,25 @@ impl AccountsPage {
         });
         dialog.present(Some(parent));
     }
+}
+
+fn present_about(ctx: &Rc<Ctx>) {
+    let i18n = &ctx.i18n;
+    let repository = env!("CARGO_PKG_REPOSITORY");
+    let about = adw::AboutDialog::builder()
+        .application_name(i18n.tr("app-name"))
+        .application_icon(crate::APP_ID)
+        .version(env!("CARGO_PKG_VERSION"))
+        .comments(i18n.tr("gui-about-comments"))
+        .website(repository)
+        .issue_url(format!("{repository}/issues"))
+        .support_url(format!("{repository}/discussions"))
+        .license_type(gtk::License::Gpl30)
+        // "Name URL" shows the name as a link.
+        .developers([format!(
+            "{} {repository}/graphs/contributors",
+            i18n.tr("gui-about-contributors")
+        )])
+        .build();
+    about.present(ctx.window().as_ref());
 }

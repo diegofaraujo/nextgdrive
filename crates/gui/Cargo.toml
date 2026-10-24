@@ -23,3 +23,6 @@ nextgdrive-composition = { version = "0.1.0", path = "../composition" }
 nextgdrive-domain = { version = "0.1.0", path = "../domain" }
 nextgdrive-i18n = { version = "0.1.0", path = "../i18n" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "signal", "sync"] }
+
+[build-dependencies]
+glib-build-tools = "0.22"

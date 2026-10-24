@@ -27,6 +27,10 @@ use nextgdrive_i18n::Localizer;
 const APP_ID: &str = "io.github.diegofaraujo.NextGDrive";
 
 fn main() -> glib::ExitCode {
+    // GtkApplication adds the resources' `icons/` folder to the icon theme,
+    // so the app icon is found without being installed.
+    gtk::gio::resources_register_include!("nextgdrive.gresource")
+        .expect("embedded resources are valid");
     let hidden = std::env::args().any(|arg| arg == autostart::BACKGROUND_FLAG);
     let app = adw::Application::builder().application_id(APP_ID).build();
     // Only the first activation may start hidden; later ones (launching the
@@ -44,6 +48,7 @@ fn activate(app: &adw::Application, hidden: bool) {
     }
 
     let i18n = Localizer::from_system();
+    gtk::Window::set_default_icon_name(APP_ID);
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title(i18n.tr("app-name"))
@@ -178,4 +183,26 @@ fn show_error(window: &adw::ApplicationWindow, message: &str) {
     ));
     window.set_content(Some(&toolbar));
     window.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use gtk::gio;
+
+    /// GtkApplication adds `<base path>/icons` to the icon theme, which looks
+    /// for `<size>/apps/<name>.png` there: no theme folder in between.
+    #[test]
+    fn the_app_icon_is_where_the_icon_theme_looks() {
+        gio::resources_register_include!("nextgdrive.gresource").unwrap();
+        let icons = "/io/github/diegofaraujo/NextGDrive/icons";
+        let path = format!("{icons}/256x256/apps/{}.png", super::APP_ID);
+        assert!(gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).is_ok());
+        // The real lookup needs a display (not in CI).
+        if gtk::init().is_ok() {
+            let theme = gtk::IconTheme::new();
+            theme.set_search_path(&[] as &[&std::path::Path]);
+            theme.add_resource_path(icons);
+            assert!(theme.has_icon(super::APP_ID));
+        }
+    }
 }

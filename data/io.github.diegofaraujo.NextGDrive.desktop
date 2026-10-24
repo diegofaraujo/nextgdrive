@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Next GDrive
+Comment=Sync or stream your Google Drive
+Comment[pt_BR]=Sincronize ou transmita seu Google Drive
+Comment[es]=Sincroniza o transmite tu Google Drive
+Exec=nextgdrive-gui
+Icon=io.github.diegofaraujo.NextGDrive
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+Keywords=Google;Drive;sync;cloud;
+StartupNotify=true
