@@ -20,7 +20,7 @@ jobs:
     name: Format, lint and test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GTK and libadwaita
         run: |
           sudo apt-get update
@@ -37,7 +37,7 @@ jobs:
     name: Minimum Rust version
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GTK and libadwaita
         run: |
           sudo apt-get update
