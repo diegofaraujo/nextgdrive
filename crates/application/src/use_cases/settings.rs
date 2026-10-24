@@ -36,6 +36,25 @@ impl<'a, S: SettingsRepository> SetNotifications<'a, S> {
     }
 }
 
+/// Sets how much disk the cache of streamed files may use. Returns the limit
+/// applied, raised to [`Settings::MIN_CACHE_LIMIT`] if lower.
+pub struct SetCacheLimit<'a, S> {
+    settings: &'a S,
+}
+
+impl<'a, S: SettingsRepository> SetCacheLimit<'a, S> {
+    pub fn new(settings: &'a S) -> Self {
+        Self { settings }
+    }
+
+    pub fn execute(&self, limit: u64) -> Result<u64, AppError> {
+        let mut settings = self.settings.load().map_err(AppError::Storage)?;
+        settings.cache_limit = limit.max(Settings::MIN_CACHE_LIMIT);
+        self.settings.save(&settings).map_err(AppError::Storage)?;
+        Ok(settings.cache_limit)
+    }
+}
+
 /// Changes the folder that holds the synced accounts, moving each account's
 /// folder there. If a move fails, the setting is left unchanged.
 pub struct SetSyncRoot<'a, S, R, F, T> {
@@ -149,6 +168,19 @@ mod tests {
             SetSyncRoot::new(&self.settings, &self.accounts, &self.fs, &self.state)
                 .execute(root.into())
         }
+    }
+
+    #[test]
+    fn the_cache_limit_has_a_minimum() {
+        let w = world();
+        let set = SetCacheLimit::new(&w.settings);
+
+        assert_eq!(set.execute(10 << 30).unwrap(), 10 << 30);
+        assert_eq!(set.execute(1).unwrap(), Settings::MIN_CACHE_LIMIT);
+        assert_eq!(
+            w.settings.load().unwrap().cache_limit,
+            Settings::MIN_CACHE_LIMIT
+        );
     }
 
     #[test]

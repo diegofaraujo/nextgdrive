@@ -19,7 +19,8 @@ use nextgdrive_application::TokenProvider;
 use nextgdrive_application::background::BackgroundSync;
 use nextgdrive_application::use_cases::{
     AddAccount, BrowseDrive, ChangeSelection, DriveTrash, GetAccountStatus, GetSettings,
-    ListAccounts, RemoveAccount, SetNotifications, SetSyncMode, SetSyncRoot, SyncAccount,
+    ListAccounts, RemoveAccount, SetCacheLimit, SetNotifications, SetSyncMode, SetSyncRoot,
+    SyncAccount,
 };
 use nextgdrive_domain::Settings;
 use nextgdrive_i18n::Localizer;
@@ -82,6 +83,10 @@ impl LocalServices {
 
     pub fn set_notifications(&self) -> SetNotifications<'_, TomlSettingsRepository> {
         SetNotifications::new(&self.settings)
+    }
+
+    pub fn set_cache_limit(&self) -> SetCacheLimit<'_, TomlSettingsRepository> {
+        SetCacheLimit::new(&self.settings)
     }
 
     pub fn set_sync_root(

@@ -102,6 +102,8 @@ Desktop trash (`streaming/trash_dir.rs`): file managers "move to trash" by creat
 
 Offline (`use_cases/offline.rs`): items of a streamed account kept in full. `Offline` resolves a path inside the account folder to a Drive item (same naming as the streamed tree), walks offline folders, and downloads missing blocks with the **same `BlockKey`s and block size as streaming** (a test proves the streamed folder then reads them without any request). The host's offline task, each round: pins every offline file at its current version (`BlockCache::pin`: never evicted, not counted toward the limit; old versions unpin and age out), downloads what is missing, and `preload`s the folders in the mount so they can be browsed without internet. Without Drive, `StreamingDrive::list` falls back to the last listing. Check it end to end by sending the daemon through a local HTTPS proxy (`HTTPS_PROXY`) and killing the proxy.
 
+Cache management: `settings.cache_limit` (minimum `Settings::MIN_CACHE_LIMIT`, set by `SetCacheLimit`) is applied by the host to its open cache each round (`DiskBlockCache::set_limit` evicts at once). `Offline::clear_cache` removes every block except the current versions of offline files, so it needs Drive and refuses (errors) rather than guess when listing fails; `cache_usage` reports bytes used and the offline part. The GUI and CLI open their own `DiskBlockCache` handle on the same folder, so eviction recounts usage from disk instead of trusting its counter. CLI: `nextgdrive cache show|clear|limit <size>` (binary units: `5G`, `500M`); GUI: Preferences → Streamed Files.
+
 Locking rule for `StreamState::table()` (a `std::sync::Mutex`): never call it in an `if let`/`match` condition whose body locks again. Temporaries in those conditions live until the end of the block, so the second lock deadlocks (this happened). Take the value into a `let` first.
 
 ### Google OAuth client
@@ -126,7 +128,7 @@ cargo test -p nextgdrive-adapter-keyring -- --ignored   # keyring test against t
 cargo test -p nextgdrive-application remove   # tests in one crate whose name matches "remove"
 cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
-cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, config mode, sync run|folders|select|deselect, trash list|restore, stream, offline add|remove|list
+cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, config mode, sync run|folders|select|deselect, trash list|restore, stream, offline add|remove|list, cache show|clear|limit
 cargo run -p nextgdrive-gui                   # run the GUI
 ```
 

@@ -25,6 +25,13 @@ pub struct OfflineFile {
     pub size: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheUsage {
+    pub used: u64,
+    /// Part of `used` that belongs to offline items (never evicted).
+    pub offline: u64,
+}
+
 /// An item marked available offline, and how much of it is on this computer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OfflineItem {
@@ -169,6 +176,39 @@ where
             }
         }
         Ok(downloaded)
+    }
+
+    /// Empties the cache of streamed files, except what `accounts` keep
+    /// offline. Nothing in Drive is touched; removed content is downloaded
+    /// again when opened. Returns the bytes freed.
+    pub async fn clear_cache(&self, accounts: &[Account]) -> Result<u64, AppError> {
+        let mut keep = Vec::new();
+        for account in accounts {
+            keep.extend(
+                self.files(account)
+                    .await?
+                    .into_iter()
+                    .map(|f| (f.id, f.version)),
+            );
+        }
+        self.cache.clear_except(&keep).map_err(AppError::Storage)
+    }
+
+    /// Bytes in the cache, and how many of them are offline items of `accounts`.
+    pub async fn cache_usage(&self, accounts: &[Account]) -> Result<CacheUsage, AppError> {
+        let mut offline = 0;
+        for account in accounts {
+            offline += self
+                .status(account)
+                .await?
+                .iter()
+                .map(|i| i.bytes_cached)
+                .sum::<u64>();
+        }
+        Ok(CacheUsage {
+            used: self.cache.usage(),
+            offline,
+        })
     }
 
     fn key(&self, file: &OfflineFile, index: u64) -> BlockKey {
@@ -469,6 +509,63 @@ mod tests {
 
         assert_eq!(fs.read(dir, 0, 100).await.unwrap(), b"0123456789abcdefghij");
         assert_eq!(w.drive.range_calls.load(Ordering::Relaxed), calls);
+    }
+
+    #[tokio::test]
+    async fn clearing_the_cache_keeps_offline_items() {
+        use crate::streaming::{ROOT, StreamConfig, StreamState, StreamingDrive};
+        use crate::use_cases::fakes::InMemoryStaging;
+
+        let w = world();
+        w.offline()
+            .add(&w.ana, Path::new("My Drive/Docs/Sub"))
+            .await
+            .unwrap();
+        let files = w.offline().files(&w.ana).await.unwrap();
+        w.offline().download(&w.ana, &files).await.unwrap();
+        // Something read while streaming, not kept offline.
+        let state = StreamState::new(StreamConfig {
+            block_size: 8,
+            ..StreamConfig::default()
+        });
+        let staging = InMemoryStaging::default();
+        let fs = StreamingDrive::new(
+            &w.tokens,
+            &w.drive,
+            &w.cache,
+            &w.settings,
+            &staging,
+            &state,
+            &w.ana,
+            String::new(),
+        );
+        let c = fs
+            .lookup(
+                fs.lookup(ROOT, "My Drive").await.unwrap().unwrap().attr.id,
+                "c.txt",
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        fs.read(c.attr.id, 0, 100).await.unwrap();
+        let usage = w
+            .offline()
+            .cache_usage(std::slice::from_ref(&w.ana))
+            .await
+            .unwrap();
+        assert_eq!((usage.used, usage.offline), (9, 4));
+
+        let freed = w
+            .offline()
+            .clear_cache(std::slice::from_ref(&w.ana))
+            .await
+            .unwrap();
+
+        assert_eq!(freed, 5);
+        assert!(
+            w.offline().status(&w.ana).await.unwrap()[0].complete(),
+            "offline item untouched"
+        );
     }
 
     #[tokio::test]

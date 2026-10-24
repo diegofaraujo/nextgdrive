@@ -94,6 +94,8 @@ mode-kept-files = Los archivos que solo existían en este equipo se movieron a {
 
 offline-complete = { $total }, en este equipo
 offline-progress = { $cached } de { $total } descargados
+cache-usage = { $used } en uso, de los cuales { $offline } disponibles sin conexión. Límite: { $limit } (los archivos sin conexión no cuentan).
+cache-cleared = Se liberaron { $freed }. Los archivos se descargan de nuevo al abrirlos.
 
 ## CLI
 
@@ -178,6 +180,13 @@ cli-offline-removed = «{ $name }» ya no se conserva sin conexión.
 cli-offline-empty = No hay nada disponible sin conexión.
 cli-offline-outside = { $path } no está dentro de la carpeta de una cuenta vinculada.
 cli-offline-not-streamed = { $email } refleja sus carpetas, que siempre están en este equipo; el modo sin conexión es para cuentas transmitidas.
+cli-cache-about = Gestiona la caché de los archivos transmitidos
+cli-cache-show-about = Muestra cuánto espacio usa la caché
+cli-cache-clear-about = Elimina el contenido descargado, excepto lo disponible sin conexión (nada cambia en Google Drive)
+cli-cache-limit-about = Define cuánto espacio puede usar la caché (los archivos sin conexión no cuentan)
+cli-cache-size = Tamaño, p. ej. 5G o 500M
+cli-cache-invalid-size = no es un tamaño: usa p. ej. 5G, 500M o 1,5G
+cli-cache-limit-set = La caché ahora puede usar hasta { $limit }.
 
 ## GUI
 
@@ -291,6 +300,17 @@ gui-offline-empty = Nada todavía. Añade archivos o carpetas con los botones de
 gui-offline-add-file = Añadir un archivo
 gui-offline-add-folder = Añadir una carpeta
 gui-offline-remove = Dejar de conservar sin conexión
+gui-cache-group = Archivos Transmitidos
+gui-cache-description = Las cuentas en modo Transmitir guardan en caché lo que abres, para que se abra más rápido la próxima vez.
+gui-cache-usage = Espacio en Uso
+gui-cache-calculating = Calculando…
+gui-cache-limit = Límite de la Caché
+gui-cache-limit-subtitle = Por encima, se elimina el contenido más antiguo; los archivos sin conexión no cuentan
+gui-cache-clear = Vaciar Caché
+gui-cache-clear-subtitle = Libera el espacio; los archivos sin conexión se conservan
+gui-cache-clear-action = Vaciar
+gui-cache-clear-title = ¿Vaciar la caché?
+gui-cache-clear-body = El contenido descargado se elimina de este equipo, excepto los archivos disponibles sin conexión. Nada cambia en Google Drive; los archivos se descargan de nuevo al abrirlos.
 
 ## Errors
 

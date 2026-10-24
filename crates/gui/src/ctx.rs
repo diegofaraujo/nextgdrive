@@ -97,6 +97,14 @@ pub fn spawn<T: Send + 'static>(
     abort
 }
 
+/// Makes the background process start a round now, to pick up a change in
+/// the settings (offline items, cache limit).
+pub async fn wake_host() {
+    if let Some(client) = nextgdrive_adapter_dbus::Client::connect().await {
+        let _ = client.sync_now().await;
+    }
+}
+
 /// Keeps `value` alive as long as `widget` exists.
 pub fn keep_alive<T: 'static>(widget: &impl IsA<gtk::Widget>, value: Rc<T>) {
     widget.connect_destroy(move |_| {

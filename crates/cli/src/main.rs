@@ -19,7 +19,9 @@ use nextgdrive_composition::{LocalServices, Services};
 use nextgdrive_domain::{Account, DriveItemId, DriveKind, Email, SyncMode};
 use nextgdrive_i18n::{FluentValue, Localizer};
 
-use cli::{AccountCommand, Command, ConfigCommand, OfflineCommand, SyncCommand, TrashCommand};
+use cli::{
+    AccountCommand, CacheCommand, Command, ConfigCommand, OfflineCommand, SyncCommand, TrashCommand,
+};
 
 fn main() -> ExitCode {
     let i18n = Localizer::from_system();
@@ -47,6 +49,7 @@ async fn run(command: Command, i18n: &Localizer) -> Result<(), String> {
     match command {
         Command::Daemon => daemon(i18n).await?,
         Command::Offline(command) => offline(i18n, command).await?,
+        Command::Cache(command) => cache(i18n, command).await?,
         Command::Stream { email, mountpoint } => stream(i18n, &email, &mountpoint).await?,
         Command::Trash(TrashCommand::List { email }) => {
             let services = Services::new(i18n).await?;
@@ -669,6 +672,65 @@ async fn offline(i18n: &Localizer, command: OfflineCommand) -> Result<(), String
         }
     }
     Ok(())
+}
+
+/// The cache of streamed files, shared by every streamed account.
+async fn cache(i18n: &Localizer, command: CacheCommand) -> Result<(), String> {
+    let app_error = |e: AppError| i18n.app_error(&e);
+    if let CacheCommand::Limit { bytes } = command {
+        let limit = LocalServices::new(i18n)?
+            .set_cache_limit()
+            .execute(bytes)
+            .map_err(app_error)?;
+        println!(
+            "{}",
+            i18n.tr_args("cli-cache-limit-set", [("limit", i18n.bytes(limit).into())])
+        );
+        // The background process applies it on its next round.
+        if let Some(client) = Client::connect().await {
+            let _ = client.sync_now().await;
+        }
+        return Ok(());
+    }
+    let services = Services::new(i18n).await?;
+    let settings = services.local.get_settings().execute().map_err(app_error)?;
+    let accounts = services
+        .local
+        .list_accounts()
+        .execute()
+        .map_err(app_error)?;
+    let cache = nextgdrive_composition::stream::open_cache(i18n, settings.cache_limit)?;
+    let offline = services.offline(&cache);
+    match command {
+        CacheCommand::Show => {
+            let usage = offline.cache_usage(&accounts).await.map_err(app_error)?;
+            println!("{}", cache_usage_message(i18n, usage, settings.cache_limit));
+        }
+        CacheCommand::Clear => {
+            let freed = offline.clear_cache(&accounts).await.map_err(app_error)?;
+            println!(
+                "{}",
+                i18n.tr_args("cache-cleared", [("freed", i18n.bytes(freed).into())])
+            );
+        }
+        CacheCommand::Limit { .. } => unreachable!("handled above"),
+    }
+    Ok(())
+}
+
+fn cache_usage_message(
+    i18n: &Localizer,
+    usage: nextgdrive_application::use_cases::CacheUsage,
+    limit: u64,
+) -> String {
+    i18n.tr_args(
+        "cache-usage",
+        [
+            ("used", i18n.bytes(usage.used).into()),
+            ("limit", i18n.bytes(limit).into()),
+            ("offline", i18n.bytes(usage.offline).into()),
+        ],
+    )
 }
 
 fn restored_message(i18n: &Localizer, name: &str, location: Option<String>) -> String {

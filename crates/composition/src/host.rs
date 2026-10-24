@@ -462,6 +462,14 @@ impl Mounts {
                 tokio::task::spawn_blocking(move || drop(mount));
             }
         }
+        // Changed in Preferences or from the CLI.
+        if let Some(cache) = &self.cache
+            && cache.limit() != settings.cache_limit
+        {
+            let cache = cache.clone();
+            let limit = settings.cache_limit;
+            tokio::task::spawn_blocking(move || cache.set_limit(limit));
+        }
         let streamed: Vec<Account> = wanted.values().map(|(a, _)| (*a).clone()).collect();
         for (id, (account, dir)) in wanted {
             if self.mounted.contains_key(&id) {

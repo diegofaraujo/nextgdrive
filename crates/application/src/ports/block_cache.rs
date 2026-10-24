@@ -26,4 +26,10 @@ pub trait BlockCache: Sync {
     /// never evicted, and do not count toward the cache limit. Replaces the
     /// previous set.
     fn pin(&self, files: &[(DriveItemId, String)]);
+
+    /// Bytes the cache holds now, offline items included.
+    fn usage(&self) -> u64;
+
+    /// Removes every block except those of `keep`. Returns the bytes freed.
+    fn clear_except(&self, keep: &[(DriveItemId, String)]) -> Result<u64, PortError>;
 }
