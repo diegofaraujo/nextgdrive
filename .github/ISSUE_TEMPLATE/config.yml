@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/diegofaraujo/nextgdrive/discussions/categories/q-a
+    about: Ask how to set up or use Next GDrive.
+  - name: Ideas
+    url: https://github.com/diegofaraujo/nextgdrive/discussions/categories/ideas
+    about: Talk about an idea before it becomes a feature request.
+  - name: Security vulnerability
+    url: https://github.com/diegofaraujo/nextgdrive/security/advisories/new
+    about: Report it privately, not in a public issue.

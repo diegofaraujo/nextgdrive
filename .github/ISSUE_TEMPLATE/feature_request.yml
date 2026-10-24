@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest something Next GDrive should do.
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: Describe what you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways around it, or how other Google Drive clients handle it.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Graphical app / tray
+        - Command line
+        - Mirror mode (synced folders)
+        - Stream mode (whole Drive, files on demand)
+        - Available offline / cache
+        - Sign-in / accounts
+        - Translations
+        - Packaging / installation
+        - Other
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to work on this.
