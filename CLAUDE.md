@@ -23,7 +23,7 @@ Core requirements:
 - All code, identifiers, comments, commit messages, and project documentation (README, CONTRIBUTING, docs/, this file) must be written in **English** to ease open-source community contribution. Only translation resource files contain other languages.
 - Architecture follows **Clean Architecture + Hexagonal (Ports & Adapters)**. See below; respect the dependency rule.
 - **Git workflow:** `main` is protected and only accepts pull requests whose CI passes (`.github/workflows/ci.yml`: fmt, clippy, tests, MSRV check). Every feature or bug starts on its own branch from up-to-date `main` (`feat/…`, `fix/…`, `docs/…`, `refactor/…`, `chore/…`); PRs are squash-merged, so the PR title is the commit message on `main`. Never push to `main` directly. See `CONTRIBUTING.md`.
-- Project assets: `docs/assets/logo.png` (README), `data/icons/hicolor/<size>/apps/io.github.diegofaraujo.NextGDrive.png` (app icon, transparent; embedded in the GUI as a GResource by `crates/gui/build.rs` from `data/resources.gresource.xml`, and GtkApplication adds its `icons/` to the icon theme, so it shows without installing), `data/icons/tray.svg` (tray icon, embedded and drawn per state by recoloring its stroke). The project's branding must not use Google's logos.
+- Project assets: `docs/assets/logo.png` (README), `data/icons/hicolor/<size>/apps/io.github.diegofaraujo.NextGDrive.png` (app icon, transparent; embedded in the GUI as a GResource by `crates/gui/build.rs` from `data/resources.gresource.xml`, and GtkApplication adds its `icons/` to the icon theme, so it shows without installing), `data/icons/tray.svg` (tray icon, embedded and drawn per state by recoloring its stroke). The dock/taskbar icon comes from `data/io.github.diegofaraujo.NextGDrive.desktop` (matched by app id), so it shows only once that file is installed (`scripts/install-user.sh`, later packages). The project's branding must not use Google's logos.
 
 ## Architecture
 
@@ -132,6 +132,7 @@ cargo clippy --all-targets -- -D warnings     # lint (must be clean)
 cargo fmt --all
 cargo run -p nextgdrive-cli -- account list   # run the CLI: daemon, status, account add|status|remove, config show|sync-root, config mode, sync run|folders|select|deselect, trash list|restore, stream, offline add|remove|list, cache show|clear|limit
 cargo run -p nextgdrive-gui                   # run the GUI
+scripts/install-user.sh                       # install for this user (~/.local): binaries, .desktop launcher, icons
 ```
 
 Set `XDG_CONFIG_HOME=$(mktemp -d)` to run against a throwaway config instead of `~/.config/nextgdrive` (copy `oauth-client.json` into it if you need sign-in).

@@ -189,13 +189,20 @@ fn show_error(window: &adw::ApplicationWindow, message: &str) {
 mod tests {
     use gtk::gio;
 
+    /// GtkApplication adds `<base path>/icons` to the icon theme, which looks
+    /// for `<size>/apps/<name>.png` there: no theme folder in between.
     #[test]
-    fn the_app_icon_is_embedded_where_gtk_looks_for_it() {
+    fn the_app_icon_is_where_the_icon_theme_looks() {
         gio::resources_register_include!("nextgdrive.gresource").unwrap();
-        let path = format!(
-            "/io/github/diegofaraujo/NextGDrive/icons/hicolor/256x256/apps/{}.png",
-            super::APP_ID
-        );
+        let icons = "/io/github/diegofaraujo/NextGDrive/icons";
+        let path = format!("{icons}/256x256/apps/{}.png", super::APP_ID);
         assert!(gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).is_ok());
+        // The real lookup needs a display (not in CI).
+        if gtk::init().is_ok() {
+            let theme = gtk::IconTheme::new();
+            theme.set_search_path(&[] as &[&std::path::Path]);
+            theme.add_resource_path(icons);
+            assert!(theme.has_icon(super::APP_ID));
+        }
     }
 }

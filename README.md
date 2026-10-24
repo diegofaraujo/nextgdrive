@@ -39,6 +39,13 @@ Stream mode also needs `fusermount3` at runtime (package `fuse3`, installed by d
 
 This produces two programs in `target/release/`: `nextgdrive-gui` (graphical app) and `nextgdrive` (command line).
 
+To install them for your user only (programs in `~/.local/bin`, launcher and icon in `~/.local/share`, so the app appears in the app menu and dock):
+
+```bash
+scripts/install-user.sh               # builds and installs
+scripts/install-user.sh --uninstall
+```
+
 ### Google OAuth client
 
 Next GDrive does not ship Google API credentials yet, so you need your own OAuth client:
