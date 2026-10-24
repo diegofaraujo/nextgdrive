@@ -211,8 +211,11 @@ jobs:
       # Reports what Flathub's review checks (some permissions need an
       # exception there); informative here.
       - name: Flathub linter
+        if: matrix.arch == 'x86_64'
         continue-on-error: true
         run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.flatpak.Builder
           flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest flatpak/io.github.diegofaraujo.NextGDrive.yml || true
           flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo || true
       - uses: actions/upload-artifact@v4
