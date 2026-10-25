@@ -1770,6 +1770,8 @@ dependencies = [
  "fuser",
  "nextgdrive-application",
  "nextgdrive-domain",
+ "rustix",
+ "tempfile",
  "tokio",
 ]
 
@@ -1877,6 +1879,7 @@ dependencies = [
 name = "nextgdrive-gui"
 version = "0.1.0"
 dependencies = [
+ "ashpd",
  "glib-build-tools",
  "gtk4",
  "ksni",

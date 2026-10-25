@@ -1,5 +1,6 @@
 //! Starting with the session, hidden in the system tray, through an XDG
-//! autostart entry (`~/.config/autostart`).
+//! autostart entry (`~/.config/autostart`). In a sandbox (Flatpak) the app
+//! cannot write it: the Background portal does, after asking the user.
 
 use std::fs;
 use std::io;
@@ -12,17 +13,41 @@ use crate::APP_ID;
 /// Command-line flag: start without opening the window.
 pub const BACKGROUND_FLAG: &str = "--background";
 
+/// The entry, in the real `~/.config` also from a sandbox (whose
+/// `XDG_CONFIG_HOME` is its own), where the portal writes it under the same name.
 fn entry_path() -> PathBuf {
-    glib::user_config_dir()
-        .join("autostart")
-        .join(format!("{APP_ID}.desktop"))
+    let config = if ashpd::is_sandboxed() {
+        glib::home_dir().join(".config")
+    } else {
+        glib::user_config_dir()
+    };
+    config.join("autostart").join(format!("{APP_ID}.desktop"))
 }
 
 pub fn is_enabled() -> bool {
     entry_path().is_file()
 }
 
-pub fn set_enabled(enabled: bool) -> io::Result<()> {
+/// Returns whether the app now starts with the session: the portal may be
+/// refused by the user. `reason` is shown in the portal's dialog.
+pub async fn set_enabled(enabled: bool, reason: String) -> Result<bool, String> {
+    if ashpd::is_sandboxed() {
+        let response = ashpd::desktop::background::Background::request()
+            .reason(reason.as_str())
+            .auto_start(enabled)
+            .command(["nextgdrive-gui", BACKGROUND_FLAG])
+            .dbus_activatable(false)
+            .send()
+            .await
+            .and_then(|request| request.response())
+            .map_err(|e| e.to_string())?;
+        return Ok(response.auto_start());
+    }
+    write_entry(enabled).map_err(|e| e.to_string())?;
+    Ok(enabled)
+}
+
+fn write_entry(enabled: bool) -> io::Result<()> {
     let path = entry_path();
     if !enabled {
         return match fs::remove_file(&path) {

@@ -475,8 +475,11 @@ impl Mounts {
             if self.mounted.contains_key(&id) {
                 continue;
             }
+            // Logged too (`daemon` shows no notifications), once per problem:
+            // mounting is retried every round.
             let problem = |message: String| {
-                reporter.problem(Notice {
+                let line = format!("{}: {message}", account.email);
+                let new = reporter.problem(Notice {
                     kind: NoticeKind::Problem,
                     title: i18n.tr_args(
                         "notify-mount-failed-title",
@@ -485,6 +488,9 @@ impl Mounts {
                     body: message,
                     account: account.email.to_string(),
                 });
+                if new {
+                    (reporter.log)(line);
+                }
             };
             if std::fs::create_dir_all(&dir).is_err() || !crate::stream::is_empty_dir(&dir) {
                 problem(i18n.tr_args(
@@ -656,17 +662,19 @@ impl Reporter {
         (self.notify)(notice);
     }
 
-    /// Notifies a problem unless the same one was already notified.
-    fn problem(&self, notice: Notice) {
+    /// Notifies a problem unless the same one was already notified. Returns
+    /// whether it was.
+    fn problem(&self, notice: Notice) -> bool {
         let Ok(mut last) = self.last_problem.lock() else {
-            return;
+            return false;
         };
         if last.get(&notice.account) == Some(&notice.body) {
-            return;
+            return false;
         }
         last.insert(notice.account.clone(), notice.body.clone());
         drop(last);
         self.notice(notice);
+        true
     }
 
     fn recovered(&self, email: &str) {

@@ -11,6 +11,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/account.png" alt="An account in Next GDrive: storage, sync mode and status" width="480">
+</p>
+
 > **Status:** early development, not yet ready for important data. Test it on a non-critical account first.
 
 ## Features
@@ -34,6 +38,7 @@ Download the package for your system from the [latest release](https://github.co
 |---|---|
 | Ubuntu 24.04+, Debian 13+, Pop!_OS | `.deb`: `sudo apt install ./nextgdrive_*.deb` |
 | Fedora, openSUSE | `.rpm`: `sudo dnf install ./nextgdrive-*.rpm` |
+| Any distribution | `.flatpak`: `flatpak install --user ./NextGDrive-*.flatpak` (Flathub coming) |
 | Any distribution | `.AppImage` (graphical app only): make it executable and run it |
 | Manual | `.tar.gz`: copy its `bin/` and `share/` into `~/.local/` |
 

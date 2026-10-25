@@ -1,0 +1,53 @@
+# Flatpak manifest. Build it from the repository root:
+#   python3 flatpak-cargo-generator.py Cargo.lock -o flatpak/cargo-sources.json
+#   flatpak-builder --user --install --force-clean target/flatpak flatpak/io.github.diegofaraujo.NextGDrive.yml
+# (flatpak-cargo-generator.py is in github.com/flatpak/flatpak-builder-tools;
+# CI regenerates cargo-sources.json, which is not committed.)
+id: io.github.diegofaraujo.NextGDrive
+runtime: org.gnome.Platform
+runtime-version: "51"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: nextgdrive-gui
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The sync folder can be anywhere in the home folder (~/GoogleDrive by
+  # default), and the autostart entry the portal writes is read back from
+  # ~/.config/autostart.
+  - --filesystem=home
+  # Tray icon (StatusNotifierItem).
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Stream mode: FUSE mounts need the host's setuid fusermount3, run through
+  # flatpak-spawn --host (see fusermount3-host).
+  - --talk-name=org.freedesktop.Flatpak
+  - --env=FUSERMOUNT_PATH=/app/bin/fusermount3-host
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/nextgdrive/cargo
+    CARGO_NET_OFFLINE: "true"
+modules:
+  - name: nextgdrive
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked --offline
+      - install -Dm755 -t /app/bin target/release/nextgdrive-gui target/release/nextgdrive
+      - install -Dm755 flatpak/fusermount3-host /app/bin/fusermount3-host
+      - install -Dm644 data/io.github.diegofaraujo.NextGDrive.desktop -t /app/share/applications
+      - install -Dm644 data/io.github.diegofaraujo.NextGDrive.metainfo.xml -t /app/share/metainfo
+      - |
+        for icon in data/icons/hicolor/*/apps/io.github.diegofaraujo.NextGDrive.png; do
+          install -Dm644 "${icon}" "/app/share/${icon#data/}"
+        done
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - .git
+      - cargo-sources.json
