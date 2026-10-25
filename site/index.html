@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Next GDrive: a Google Drive client for Linux</title>
+<meta name="description" content="Next GDrive is an open-source Google Drive client for Linux: sync chosen folders both ways, or stream your whole Drive and download files only when you open them.">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <img class="icon" src="icon.png" alt="">
+  <h1>Next GDrive</h1>
+  <p class="tagline">An open-source Google Drive client for Linux</p>
+  <nav><a href="#install">Install</a> <a href="privacy.html">Privacy</a> <a href="terms.html">Terms</a> <a href="https://github.com/diegofaraujo/nextgdrive">Source code</a></nav>
+</header>
+
+<p>Next GDrive keeps your Google Drive on your Linux computer, for one or more Google accounts, with My Drive and shared drives. Each account works in one of two modes:</p>
+<ul>
+  <li><strong>Mirror</strong>: the folders you choose are copied to your computer and kept in sync in both directions, so they work offline in any app.</li>
+  <li><strong>Stream</strong>: your whole Drive appears in a folder, and files are downloaded only when you open them. Files and folders can be kept available offline.</li>
+</ul>
+<p>Nothing is ever deleted permanently: deleted files go to the Google Drive trash, which you can browse and restore from. When a file changes in two places, both versions are kept. The app runs in the background with a tray icon, and everything it does is also available from the command line.</p>
+
+<img class="shot" src="screenshots/account.png" alt="An account in Next GDrive: storage, sync mode and status" width="646" height="624">
+
+<h2>How it uses your Google account</h2>
+<p>Next GDrive asks for access to your Google Drive so it can copy, stream, upload, move and trash your files at your request. It talks directly to Google from your computer: there is no Next GDrive server, and no data is sent to the developers or anyone else. See the <a href="privacy.html">privacy policy</a> for details.</p>
+
+<h2 id="install">Install</h2>
+<h3>Flatpak, on any distribution</h3>
+<p>Kept up to date by <code>flatpak update</code>; the runtime it needs comes from <a href="https://flathub.org">Flathub</a>.</p>
+<pre>flatpak install --user https://diegofaraujo.github.io/nextgdrive/io.github.diegofaraujo.NextGDrive.flatpakref</pre>
+<h3>Ubuntu 24.04+, Debian 13+, Pop!_OS, Linux Mint 22</h3>
+<p>Download the <code>.deb</code> for your computer from the <a href="https://github.com/diegofaraujo/nextgdrive/releases/latest">latest release</a>, then:</p>
+<pre>sudo apt install ./nextgdrive_*.deb</pre>
+<h3>Fedora, openSUSE</h3>
+<p>Download the <code>.rpm</code> from the <a href="https://github.com/diegofaraujo/nextgdrive/releases/latest">latest release</a>, then:</p>
+<pre>sudo dnf install ./nextgdrive-*.rpm</pre>
+<h3>AppImage</h3>
+<p>Download it from the <a href="https://github.com/diegofaraujo/nextgdrive/releases/latest">latest release</a>, make it executable, and run it.</p>
+<p>Packages exist for <code>x86_64</code> (most PCs) and <code>aarch64</code>/<code>arm64</code> (ARM computers).</p>
+<p class="note">Next GDrive is in early development: try it with data you have backed up. Questions, ideas and bug reports are welcome on <a href="https://github.com/diegofaraujo/nextgdrive/discussions">GitHub</a>.</p>
+
+<footer>
+  Next GDrive is free software under the <a href="https://github.com/diegofaraujo/nextgdrive/blob/main/LICENSE">GPL-3.0-or-later</a>. It is not affiliated with, endorsed by or sponsored by Google. Google Drive is a trademark of Google LLC.<br>
+  <a href="privacy.html">Privacy policy</a> · <a href="terms.html">Terms of service</a>
+</footer>
+</body>
+</html>

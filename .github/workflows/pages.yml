@@ -1,0 +1,93 @@
+name: Website
+
+# The website (site/) and the Flatpak repository, on GitHub Pages. The
+# repository holds the latest release's Flatpak bundles; the release workflow
+# runs this after publishing. Pull requests only build it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - docs/screenshots/**
+      - packaging/flatpak-repo.sh
+      - flatpak/nextgdrive-repo.asc
+      - .github/workflows/pages.yml
+  pull_request:
+    paths:
+      - site/**
+      - packaging/flatpak-repo.sh
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundles:
+    name: Latest release's Flatpak bundles
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "${GITHUB_REPOSITORY}" --pattern '*.flatpak' --dir bundles
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundles
+          path: bundles/*.flatpak
+          if-no-files-found: error
+
+  build:
+    name: Build the site
+    needs: bundles
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-bundles
+          path: bundles
+      - name: Website
+        run: |
+          mkdir -p public/screenshots
+          cp -r site/. public/
+          cp docs/screenshots/*.png public/screenshots/
+      - name: Signed Flatpak repository
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          if [ -z "${FLATPAK_GPG_PRIVATE_KEY}" ]; then
+            echo "::warning::No signing key (e.g. a pull request from a fork): the site is built without the Flatpak repository."
+            cp data/icons/hicolor/128x128/apps/io.github.diegofaraujo.NextGDrive.png public/icon.png
+            exit 0
+          fi
+          export GNUPGHOME="$(mktemp -d)"
+          printf '%s\n' "${FLATPAK_GPG_PRIVATE_KEY}" | gpg --batch --quiet --import
+          packaging/flatpak-repo.sh bundles public \
+            "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" \
+            "${FLATPAK_GPG_KEY_ID}" "${GNUPGHOME}"
+          rm -rf "${GNUPGHOME}"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    name: Publish
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy policy · Next GDrive</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<p><a href="./">← Next GDrive</a></p>
+<h1>Privacy policy</h1>
+<p>Effective October 25, 2026.</p>
+
+<p>Next GDrive is an open-source desktop application for Linux that keeps your Google Drive on your computer. It runs entirely on your computer and talks directly to Google's servers. <strong>There is no Next GDrive server: the developers do not receive, collect, store or have access to any of your data.</strong> The source code, which shows exactly what the application does, is public at <a href="https://github.com/diegofaraujo/nextgdrive">github.com/diegofaraujo/nextgdrive</a>.</p>
+
+<h2>Google user data the application accesses</h2>
+<p>When you link a Google account, you grant Next GDrive the <code>https://www.googleapis.com/auth/drive</code> permission ("See, edit, create, and delete all of your Google Drive files"). With it, the application accesses:</p>
+<ul>
+  <li><strong>Your Google Drive files and folders</strong>, in My Drive and in the shared drives you belong to: their content and their metadata (names, folders, sizes, modification times, checksums, sharing capabilities), including items in the Drive trash.</li>
+  <li><strong>Your account's name, email address and storage quota</strong>, to show which account is linked and how much space is used and available.</li>
+</ul>
+
+<h2>How the application uses that data</h2>
+<p>Only to provide the features you use, on your own computer:</p>
+<ul>
+  <li>copying the folders you choose to your computer and keeping them in sync in both directions (uploading, downloading, renaming, moving and trashing items as you change them on either side);</li>
+  <li>showing your Drive as a folder and downloading files when you open them, including files you mark as available offline;</li>
+  <li>listing and restoring items from your Google Drive trash;</li>
+  <li>showing your storage usage, the sync status and errors.</li>
+</ul>
+<p>Next GDrive does not use your data for advertising, analytics, profiling, training machine-learning models, or any purpose other than those features. It does not sell, transfer or share your data with anyone. It contains no telemetry, ads or third-party tracking.</p>
+
+<h2>Where the data is stored</h2>
+<p>Only on your computer, in your user account:</p>
+<ul>
+  <li>the files you sync or keep offline, in the folder you choose (by default <code>~/GoogleDrive</code>);</li>
+  <li>a local record of synced items (names, identifiers, checksums, times), used to tell what changed, in <code>~/.local/share/nextgdrive</code>;</li>
+  <li>a cache of recently opened streamed files, in <code>~/.cache/nextgdrive</code>, limited in size;</li>
+  <li>the list of linked accounts (email and name) and your settings, in <code>~/.config/nextgdrive</code>;</li>
+  <li>the sign-in credential Google issues (a refresh token), only in your system's keyring (a Secret Service provider such as GNOME Keyring or KeePassXC), never in plain files. Short-lived access tokens are kept in memory only.</li>
+</ul>
+<p>When installed as a Flatpak, the same data lives under <code>~/.var/app/io.github.diegofaraujo.NextGDrive/</code>, and the credential in the keyring provided by the system's portal.</p>
+<p>The application connects only to Google (<code>accounts.google.com</code>, <code>oauth2.googleapis.com</code> and <code>www.googleapis.com</code>), over encrypted HTTPS connections.</p>
+
+<h2>Removing your data</h2>
+<ul>
+  <li><strong>Unlinking an account</strong> in the application deletes its credential from the keyring and the account from the settings. Files already on your computer are kept, so you do not lose them; you can delete them, and the folders listed above, at any time.</li>
+  <li><strong>Revoking access</strong>: you can withdraw Next GDrive's access to your Google account at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+  <li>Uninstalling the application does not delete your files in Google Drive.</li>
+</ul>
+
+<h2>Google API Services User Data Policy</h2>
+<p>Next GDrive's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+<h2>Children</h2>
+<p>Next GDrive is not directed at children and collects no data from anyone.</p>
+
+<h2>Changes to this policy</h2>
+<p>Changes are published on this page, with a new effective date, and recorded in the project's public history at <a href="https://github.com/diegofaraujo/nextgdrive/commits/main/site/privacy.html">GitHub</a>.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: open an issue at <a href="https://github.com/diegofaraujo/nextgdrive/issues">github.com/diegofaraujo/nextgdrive/issues</a>. To report a security problem privately, use <a href="https://github.com/diegofaraujo/nextgdrive/security/advisories/new">GitHub's security advisories</a>.</p>
+
+<footer><a href="./">Next GDrive</a> · <a href="terms.html">Terms of service</a></footer>
+</body>
+</html>
