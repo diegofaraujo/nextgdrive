@@ -2,11 +2,13 @@
 //! [`StreamBackend`], each answered from a task on the Tokio runtime so a slow
 //! download or upload never holds up other requests.
 
-use std::ffi::OsStr;
+mod fusermount;
+
+use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::io;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -457,8 +459,24 @@ impl<B: StreamBackend> Filesystem for StreamFs<B> {
 
 /// A mounted filesystem; dropping it unmounts.
 pub struct Mount {
+    /// Set when mounted through `FUSERMOUNT_PATH`, which fuser does not know
+    /// about, so unmounting is ours.
+    helper: Option<(OsString, PathBuf)>,
     _session: fuser::BackgroundSession,
 }
+
+impl Drop for Mount {
+    /// Unmounting first ends the session's loop, so dropping it then returns.
+    fn drop(&mut self) {
+        if let Some((helper, mountpoint)) = &self.helper {
+            fusermount::unmount(helper, mountpoint);
+        }
+    }
+}
+
+/// The mount options below, as `fusermount3 -o` takes them.
+const HELPER_OPTIONS: &str =
+    "fsname=nextgdrive,subtype=nextgdrive,default_permissions,nosuid,nodev";
 
 /// Mounts `backend` at `mountpoint` (an existing, empty folder). Requests are
 /// answered on `runtime`.
@@ -484,6 +502,150 @@ pub fn mount<B: StreamBackend>(
         MountOption::NoSuid,
         MountOption::NoDev,
     ];
+    if let Some(helper) = std::env::var_os("FUSERMOUNT_PATH") {
+        let fd = fusermount::mount(&helper, mountpoint, HELPER_OPTIONS)?;
+        let acl = config.acl;
+        let session = fuser::Session::from_fd(fs, fd, acl, config).and_then(|s| s.spawn());
+        let helper = (helper, mountpoint.to_owned());
+        return match session {
+            Ok(session) => Ok(Mount {
+                helper: Some(helper),
+                _session: session,
+            }),
+            Err(e) => {
+                fusermount::unmount(&helper.0, &helper.1);
+                Err(e)
+            }
+        };
+    }
     let session = fuser::spawn_mount(fs, mountpoint, &config)?;
-    Ok(Mount { _session: session })
+    Ok(Mount {
+        helper: None,
+        _session: session,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use nextgdrive_application::streaming::ROOT;
+
+    use super::*;
+
+    const HELLO: NodeId = 2;
+
+    /// A folder with one file, `hello.txt`.
+    struct OneFile;
+
+    impl OneFile {
+        fn hello() -> Entry {
+            Entry {
+                name: "hello.txt".into(),
+                attr: NodeAttr {
+                    id: HELLO,
+                    kind: NodeKind::File,
+                    size: 5,
+                    modified: UNIX_EPOCH,
+                    private: false,
+                },
+            }
+        }
+    }
+
+    impl StreamBackend for OneFile {
+        fn attr(&self, id: NodeId) -> Option<NodeAttr> {
+            match id {
+                ROOT => Some(NodeAttr {
+                    id: ROOT,
+                    kind: NodeKind::Dir,
+                    size: 0,
+                    modified: UNIX_EPOCH,
+                    private: false,
+                }),
+                HELLO => Some(Self::hello().attr),
+                _ => None,
+            }
+        }
+        async fn list(&self, _: NodeId) -> Result<Vec<Entry>, StreamError> {
+            Ok(vec![Self::hello()])
+        }
+        async fn lookup(&self, _: NodeId, name: &str) -> Result<Option<Entry>, StreamError> {
+            Ok((name == "hello.txt").then(Self::hello))
+        }
+        async fn read(&self, _: NodeId, offset: u64, size: u32) -> Result<Vec<u8>, StreamError> {
+            let data = b"hello";
+            let start = usize::try_from(offset)
+                .unwrap_or(usize::MAX)
+                .min(data.len());
+            let end = (start + size as usize).min(data.len());
+            Ok(data[start..end].to_vec())
+        }
+        async fn create(&self, _: NodeId, _: &str) -> Result<Entry, StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn open_write(&self, _: NodeId, _: bool) -> Result<(), StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        fn write(&self, _: NodeId, _: u64, _: &[u8]) -> Result<u32, StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn set_len(&self, _: NodeId, _: u64) -> Result<(), StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn flush(&self, _: NodeId) -> Result<(), StreamError> {
+            Ok(())
+        }
+        async fn mkdir(&self, _: NodeId, _: &str) -> Result<Entry, StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn unlink(&self, _: NodeId, _: &str) -> Result<(), StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn rmdir(&self, _: NodeId, _: &str) -> Result<(), StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn rename(&self, _: NodeId, _: &str, _: NodeId, _: &str) -> Result<(), StreamError> {
+            Err(StreamError::NotPermitted)
+        }
+        async fn quota(&self) -> Option<StorageQuota> {
+            None
+        }
+        fn report(&self, _: &StreamError) {}
+    }
+
+    fn is_mounted(dir: &Path) -> bool {
+        let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+        let dir = dir.to_string_lossy();
+        mounts
+            .lines()
+            .any(|line| line.split(' ').nth(4) == Some(&*dir))
+    }
+
+    /// Needs FUSE (`fusermount3`). Run inside the Flatpak to check mounting
+    /// from the sandbox: `flatpak run --command=<this test binary>
+    /// io.github.diegofaraujo.NextGDrive --ignored`, which sets FUSERMOUNT_PATH.
+    #[test]
+    #[ignore = "needs FUSE; run with --ignored"]
+    fn mounts_reads_and_unmounts() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        // In the home folder: the same path inside a sandbox and on the host.
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+        let dir = tempfile::tempdir_in(home).unwrap();
+
+        let mounted = mount(Arc::new(OneFile), dir.path(), runtime.handle().clone()).unwrap();
+        assert!(is_mounted(dir.path()));
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["hello.txt"]);
+        assert_eq!(
+            std::fs::read(dir.path().join("hello.txt")).unwrap(),
+            b"hello"
+        );
+
+        drop(mounted);
+        assert!(!is_mounted(dir.path()));
+    }
 }

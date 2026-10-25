@@ -225,7 +225,11 @@ pub fn start(i18n: Localizer, host: Arc<SyncHost>) -> Option<mpsc::UnboundedRece
         actions,
         icons: Icons::render(),
     };
-    let handle = runtime().block_on(tray.spawn()).ok()?;
+    // A sandbox may not own the item's well-known name; watchers accept the
+    // unique connection name instead.
+    let handle = runtime()
+        .block_on(tray.disable_dbus_name(ashpd::is_sandboxed()).spawn())
+        .ok()?;
     runtime().spawn(async move {
         while status.changed().await.is_ok() {
             let current = status.borrow_and_update().clone();

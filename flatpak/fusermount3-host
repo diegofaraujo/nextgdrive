@@ -1,0 +1,10 @@
+#!/bin/sh
+# FUSE mounts need the setuid fusermount3, which a sandbox cannot run, so the
+# host's runs it (FUSERMOUNT_PATH points here). fuser passes in _FUSE_COMMFD the
+# socket on which fusermount3 sends back the /dev/fuse descriptor: forward it.
+# The mount point is in the home folder, which has the same path on both sides.
+if [ -n "${_FUSE_COMMFD:-}" ]; then
+    exec flatpak-spawn --host --forward-fd="${_FUSE_COMMFD}" \
+        --env=_FUSE_COMMFD="${_FUSE_COMMFD}" fusermount3 "$@"
+fi
+exec flatpak-spawn --host fusermount3 "$@"

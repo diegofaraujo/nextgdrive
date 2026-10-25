@@ -312,11 +312,18 @@ pub fn open_staging(i18n: &Localizer, account: &Account) -> Result<DiskStaging, 
 pub(crate) fn clear_stale_mount(mountpoint: &Path) {
     let dead = matches!(std::fs::metadata(mountpoint), Err(e) if e.raw_os_error() == Some(107)); // ENOTCONN
     if dead {
-        let _ = std::process::Command::new("fusermount3")
+        let _ = std::process::Command::new(fusermount())
             .args(["-u", "-z"])
             .arg(mountpoint)
             .status();
     }
+}
+
+/// The `fusermount3` to run: `FUSERMOUNT_PATH` if set, as fuser does for the
+/// mounts themselves. The Flatpak sets it to a wrapper that runs the host's,
+/// since mounting needs a setuid helper the sandbox cannot have.
+fn fusermount() -> std::ffi::OsString {
+    std::env::var_os("FUSERMOUNT_PATH").unwrap_or_else(|| "fusermount3".into())
 }
 
 /// Whether a folder is empty (or missing), so a Drive can be mounted on it.

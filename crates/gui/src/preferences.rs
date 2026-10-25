@@ -38,10 +38,35 @@ pub fn present(ctx: &Rc<Ctx>) {
         .active(autostart::is_enabled())
         .build();
     let ctx_for_autostart = ctx.clone();
+    // Set back to what took effect, without asking again.
+    let applying = std::rc::Rc::new(std::cell::Cell::new(false));
     autostart_row.connect_active_notify(move |row| {
-        if let Err(e) = autostart::set_enabled(row.is_active()) {
-            ctx_for_autostart.toast(&e.to_string());
+        if applying.get() {
+            return;
         }
+        let ctx = ctx_for_autostart.clone();
+        let wanted = row.is_active();
+        let reason = ctx.i18n.tr("gui-autostart-reason");
+        let (row, applying) = (row.downgrade(), applying.clone());
+        spawn(autostart::set_enabled(wanted, reason), move |result| {
+            let enabled = match result {
+                Ok(enabled) => enabled,
+                Err(details) => {
+                    let message = ctx
+                        .i18n
+                        .tr_args("gui-autostart-failed", [("details", details.into())]);
+                    ctx.toast(&message);
+                    !wanted
+                }
+            };
+            if let Some(row) = row.upgrade()
+                && row.is_active() != enabled
+            {
+                applying.set(true);
+                row.set_active(enabled);
+                applying.set(false);
+            }
+        });
     });
     let notifications_row = adw::SwitchRow::builder()
         .title(i18n.tr("gui-notifications"))
