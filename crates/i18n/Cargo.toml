@@ -12,6 +12,6 @@ workspace = true
 [dependencies]
 fluent-templates = "0.15.1"
 jiff = "0.2.38"
-nextgdrive-application = { version = "0.1.0", path = "../application" }
-nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+nextgdrive-application = { path = "../application" }
+nextgdrive-domain = { path = "../domain" }
 sys-locale = "0.3.2"

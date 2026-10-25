@@ -11,16 +11,16 @@ workspace = true
 
 [dependencies]
 jiff = "0.2.38"
-nextgdrive-adapter-cache = { version = "0.1.0", path = "../adapter-cache" }
-nextgdrive-adapter-config = { version = "0.1.0", path = "../adapter-config" }
-nextgdrive-adapter-dbus = { version = "0.1.0", path = "../adapter-dbus" }
-nextgdrive-adapter-fuse = { version = "0.1.0", path = "../adapter-fuse" }
-nextgdrive-adapter-google = { version = "0.1.0", path = "../adapter-google" }
-nextgdrive-adapter-keyring = { version = "0.1.0", path = "../adapter-keyring" }
-nextgdrive-adapter-localfs = { version = "0.1.0", path = "../adapter-localfs" }
-nextgdrive-adapter-sqlite = { version = "0.1.0", path = "../adapter-sqlite" }
-nextgdrive-application = { version = "0.1.0", path = "../application" }
-nextgdrive-domain = { version = "0.1.0", path = "../domain" }
-nextgdrive-i18n = { version = "0.1.0", path = "../i18n" }
+nextgdrive-adapter-cache = { path = "../adapter-cache" }
+nextgdrive-adapter-config = { path = "../adapter-config" }
+nextgdrive-adapter-dbus = { path = "../adapter-dbus" }
+nextgdrive-adapter-fuse = { path = "../adapter-fuse" }
+nextgdrive-adapter-google = { path = "../adapter-google" }
+nextgdrive-adapter-keyring = { path = "../adapter-keyring" }
+nextgdrive-adapter-localfs = { path = "../adapter-localfs" }
+nextgdrive-adapter-sqlite = { path = "../adapter-sqlite" }
+nextgdrive-application = { path = "../application" }
+nextgdrive-domain = { path = "../domain" }
+nextgdrive-i18n = { path = "../i18n" }
 tokio = { version = "1.54.1", features = ["rt", "sync", "time", "macros"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }

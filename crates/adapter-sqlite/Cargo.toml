@@ -10,8 +10,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-nextgdrive-application = { version = "0.1.0", path = "../application" }
-nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+nextgdrive-application = { path = "../application" }
+nextgdrive-domain = { path = "../domain" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [dev-dependencies]

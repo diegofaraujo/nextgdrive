@@ -6,6 +6,19 @@ Each release is also described in `data/io.github.diegofaraujo.NextGDrive.metain
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
+### Added
+
+- Flatpak: a `.flatpak` bundle for x86_64 and aarch64 with each release, and the groundwork for Flathub. Stream mode, the tray icon, start at login (through the system's Background portal) and the keyring work inside the sandbox.
+- The app's own icon in the window, the dock, the tray and a new About dialog.
+- Screenshots in the app's description for software centers.
+
+### Fixed
+
+- Start at login from an AppImage pointed to a temporary path; it now starts the AppImage file.
+- `nextgdrive daemon` did not show when a streamed folder could not be mounted.
+
 ## [0.1.0] - 2026-10-24
 
 First release.
@@ -18,5 +31,6 @@ First release.
 - Tray app with notifications and start at login; command-line interface with the same features.
 - English, Portuguese (Brazil) and Spanish.
 
-[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/diegofaraujo/nextgdrive/releases/tag/v0.1.0
