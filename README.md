@@ -38,7 +38,7 @@ Download the package for your system from the [latest release](https://github.co
 |---|---|
 | Ubuntu 24.04+, Debian 13+, Pop!_OS | `.deb`: `sudo apt install ./nextgdrive_*.deb` |
 | Fedora, openSUSE | `.rpm`: `sudo dnf install ./nextgdrive-*.rpm` |
-| Any distribution | `.flatpak`: `flatpak install --user ./NextGDrive-*.flatpak` (Flathub coming) |
+| Any distribution | Flatpak, kept up to date by `flatpak update`: `flatpak install --user https://diegofaraujo.github.io/nextgdrive/io.github.diegofaraujo.NextGDrive.flatpakref` |
 | Any distribution | `.AppImage` (graphical app only): make it executable and run it |
 | Manual | `.tar.gz`: copy its `bin/` and `share/` into `~/.local/` |
 
