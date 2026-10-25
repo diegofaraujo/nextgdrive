@@ -10,8 +10,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-nextgdrive-application = { version = "0.1.0", path = "../application" }
-nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+nextgdrive-application = { path = "../application" }
+nextgdrive-domain = { path = "../domain" }
 oo7 = { version = "0.6.0", default-features = false, features = ["tokio", "native_crypto"] }
 
 [dev-dependencies]

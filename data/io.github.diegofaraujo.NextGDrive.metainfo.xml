@@ -84,6 +84,15 @@
   </branding>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.1" date="2026-10-24">
+      <description>
+        <ul>
+          <li>Available as a Flatpak: streaming, the tray icon and start at login work inside the sandbox</li>
+          <li>The app's own icon in the window, the dock and the tray, and an About dialog</li>
+          <li>Start at login works when running the AppImage</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-24">
       <description>
         <p>First release.</p>

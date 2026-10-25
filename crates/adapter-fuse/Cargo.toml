@@ -11,8 +11,8 @@ workspace = true
 
 [dependencies]
 fuser = "0.18"
-nextgdrive-application = { version = "0.1.0", path = "../application" }
-nextgdrive-domain = { version = "0.1.0", path = "../domain" }
+nextgdrive-application = { path = "../application" }
+nextgdrive-domain = { path = "../domain" }
 rustix = { version = "1.1", features = ["fs", "net", "std"] }
 tokio = { version = "1.54.1", features = ["rt"] }
 

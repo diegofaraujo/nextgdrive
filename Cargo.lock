@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-cache"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
@@ -1744,7 +1744,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
@@ -1756,7 +1756,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-dbus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "tokio",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-fuse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fuser",
  "nextgdrive-application",
@@ -1777,7 +1777,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-google"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "humantime",
  "nextgdrive-application",
@@ -1793,7 +1793,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-keyring"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-localfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "md-5 0.11.0",
  "nextgdrive-application",
@@ -1817,7 +1817,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-adapter-sqlite"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nextgdrive-application",
  "nextgdrive-domain",
@@ -1827,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "md-5 0.11.0",
  "nextgdrive-domain",
@@ -1837,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "nextgdrive-adapter-dbus",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-composition"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "nextgdrive-adapter-cache",
@@ -1870,14 +1870,14 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "nextgdrive-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ashpd",
  "glib-build-tools",
@@ -1894,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "nextgdrive-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fluent-templates",
  "jiff",
