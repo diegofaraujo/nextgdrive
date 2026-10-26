@@ -77,6 +77,8 @@ notify-mount-failed-title = Não foi possível abrir a pasta do Google Drive de 
 notify-upload-failed-title = Ainda não foi possível enviar “{ $name }”
 notify-and-more = { $list } e mais { $count }
 notify-open = Abrir
+notify-background-title = O Next GDrive continua sincronizando
+notify-background-body = Abra-o de novo pelos seus aplicativos para vê-lo. Para parar de sincronizar, escolha Sair no menu dele.
 
 # strftime syntax: https://docs.rs/jiff/latest/jiff/fmt/strtime/
 date-format = %d/%m/%Y %H:%M
@@ -208,6 +210,7 @@ gui-quota-error = Não foi possível verificar o armazenamento
 gui-main-menu = Menu principal
 gui-preferences = Preferências
 gui-about = Sobre o Next GDrive
+gui-quit = Sair
 gui-about-comments = Seu Google Drive no Linux: sincronize pastas nos dois sentidos, ou transmita o Drive inteiro e baixe os arquivos só quando abri-los.
 gui-about-contributors = Contribuidores do Next GDrive
 gui-storage = Armazenamento

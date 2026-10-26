@@ -77,6 +77,8 @@ notify-mount-failed-title = Could not open the Google Drive folder of { $email }
 notify-upload-failed-title = Could not upload “{ $name }” yet
 notify-and-more = { $list } and { $count } more
 notify-open = Open
+notify-background-title = Next GDrive is still syncing
+notify-background-body = Open it again from your apps to see it. To stop syncing, choose Quit in its menu.
 
 # strftime syntax: https://docs.rs/jiff/latest/jiff/fmt/strtime/
 date-format = %Y-%m-%d %H:%M
@@ -208,6 +210,7 @@ gui-quota-error = Could not check storage
 gui-main-menu = Main Menu
 gui-preferences = Preferences
 gui-about = About Next GDrive
+gui-quit = Quit
 gui-about-comments = Your Google Drive on Linux: sync folders both ways, or stream the whole Drive and download files only when you open them.
 gui-about-contributors = Next GDrive contributors
 gui-storage = Storage
