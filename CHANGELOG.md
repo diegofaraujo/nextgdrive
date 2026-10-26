@@ -6,6 +6,10 @@ Each release is also described in `data/io.github.diegofaraujo.NextGDrive.metain
 
 ## [Unreleased]
 
+### Fixed
+
+- Closing the window on desktops without a tray (GNOME without the AppIndicator extension, as on Fedora) quit the app and stopped syncing. It now keeps syncing in the background and says so in a notification; launching the app again shows the window, and **Quit** (Ctrl+Q) in its menu stops it. The tray icon appears as soon as the desktop can show it.
+
 ## [0.1.1] - 2026-10-24
 
 ### Added

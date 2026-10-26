@@ -44,6 +44,9 @@ pub fn build(ctx: &Rc<Ctx>) -> adw::NavigationPage {
         Some("accounts.preferences"),
     );
     menu.append(Some(&i18n.tr("gui-about")), Some("accounts.about"));
+    let quit = gio::Menu::new();
+    quit.append(Some(&i18n.tr("gui-quit")), Some("app.quit"));
+    menu.append_section(None, &quit);
     header.pack_end(
         &gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")

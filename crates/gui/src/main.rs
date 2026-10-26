@@ -93,6 +93,15 @@ fn activate(app: &adw::Application, hidden: bool) {
         }
     });
     app.add_action(&show);
+    let quit = gtk::gio::SimpleAction::new("quit", None);
+    let quitting = app.downgrade();
+    quit.connect_activate(move |_, _| {
+        if let Some(app) = quitting.upgrade() {
+            app.quit();
+        }
+    });
+    app.add_action(&quit);
+    app.set_accels_for_action("app.quit", &["<Control>q"]);
 
     let nav = adw::NavigationView::new();
     let toasts = adw::ToastOverlay::new();
@@ -134,6 +143,7 @@ fn activate(app: &adw::Application, hidden: bool) {
             }
         });
     }
+    let hosting = host.is_ok();
     let tray = match host {
         Ok(host) => tray::start(i18n, host),
         Err(StartError::AlreadyRunning) => {
@@ -148,13 +158,30 @@ fn activate(app: &adw::Application, hidden: bool) {
             None
         }
     };
-    if let Some(mut actions) = tray {
-        // Closing the window leaves the app running in the tray.
-        std::mem::forget(app.hold());
-        window.set_hide_on_close(true);
+    if !hosting {
+        window.present();
+        return;
+    }
+    // This process runs background sync, so closing the window leaves it
+    // running, tray icon or not. Without one, launching the app again shows
+    // the window, and Quit in its menu stops syncing.
+    std::mem::forget(app.hold());
+    window.set_hide_on_close(true);
+    let shown = tray.as_ref().map(|tray| tray.shown.clone());
+    let (told, app_ref, i18n) = (Cell::new(false), app.downgrade(), ctx.i18n.clone());
+    window.connect_close_request(move |_| {
+        if !shown.as_ref().is_some_and(tray::Shown::get)
+            && !told.replace(true)
+            && let Some(app) = app_ref.upgrade()
+        {
+            notifications::send_still_running(&app, &i18n);
+        }
+        glib::Propagation::Proceed
+    });
+    if let Some(mut tray) = tray {
         let (app, window_ref) = (app.clone(), window.downgrade());
         glib::spawn_future_local(async move {
-            while let Some(action) = actions.recv().await {
+            while let Some(action) = tray.actions.recv().await {
                 match action {
                     tray::TrayAction::Open => {
                         if let Some(window) = window_ref.upgrade() {
@@ -165,11 +192,10 @@ fn activate(app: &adw::Application, hidden: bool) {
                 }
             }
         });
-        if hidden {
-            return;
-        }
     }
-    window.present();
+    if !hidden {
+        window.present();
+    }
 }
 
 fn show_error(window: &adw::ApplicationWindow, message: &str) {

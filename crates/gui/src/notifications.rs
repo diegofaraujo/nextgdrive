@@ -25,3 +25,12 @@ pub fn send(app: &adw::Application, notice: &Notice) {
     let id = format!("{:?}-{}", notice.kind, notice.account);
     app.send_notification(Some(&id), &notification);
 }
+
+/// Closing the window without a tray icon to bring it back: says that sync
+/// goes on, and how to get back or stop it.
+pub fn send_still_running(app: &adw::Application, i18n: &Localizer) {
+    let notification = gio::Notification::new(&i18n.tr("notify-background-title"));
+    notification.set_body(Some(&i18n.tr("notify-background-body")));
+    notification.set_default_action("app.show-window");
+    app.send_notification(Some("background"), &notification);
+}

@@ -1,6 +1,7 @@
 //! System tray icon (StatusNotifierItem), shown while background sync runs.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gtk::{gdk_pixbuf, gio, glib};
 use ksni::menu::StandardItem;
@@ -96,6 +97,7 @@ struct Tray {
     status: HostStatus,
     actions: mpsc::UnboundedSender<TrayAction>,
     icons: Icons,
+    shown: Shown,
 }
 
 impl Tray {
@@ -147,6 +149,16 @@ impl ksni::Tray for Tray {
     /// Left click opens the window.
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.actions.send(TrayAction::Open);
+    }
+
+    fn watcher_online(&self) {
+        self.shown.set(true);
+    }
+
+    /// Keeps waiting: the panel may come back (or its extension be enabled).
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        self.shown.set(false);
+        true
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -213,22 +225,50 @@ impl ksni::Tray for Tray {
     }
 }
 
-/// Shows the tray icon and keeps it in step with the host's status. Returns
-/// the requests the GTK side must handle, or `None` if no tray is available.
-pub fn start(i18n: Localizer, host: Arc<SyncHost>) -> Option<mpsc::UnboundedReceiver<TrayAction>> {
+/// The tray icon's requests, and whether a panel shows it.
+pub struct TrayIcon {
+    pub actions: mpsc::UnboundedReceiver<TrayAction>,
+    pub shown: Shown,
+}
+
+/// Whether a panel shows the tray icon right now: not on desktops without a
+/// StatusNotifierItem host, like GNOME without the AppIndicator extension.
+#[derive(Clone)]
+pub struct Shown(Arc<AtomicBool>);
+
+impl Shown {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn set(&self, shown: bool) {
+        self.0.store(shown, Ordering::Relaxed);
+    }
+}
+
+/// Shows the tray icon and keeps it in step with the host's status. If no
+/// panel shows tray icons yet, it appears once one does. `None` only if the
+/// session bus failed.
+pub fn start(i18n: Localizer, host: Arc<SyncHost>) -> Option<TrayIcon> {
     let (actions, receiver) = mpsc::unbounded_channel();
     let mut status = host.status();
+    let shown = Shown(Arc::new(AtomicBool::new(true)));
     let tray = Tray {
         i18n,
         status: status.borrow().clone(),
         host,
         actions,
         icons: Icons::render(),
+        shown: shown.clone(),
     };
     // A sandbox may not own the item's well-known name; watchers accept the
     // unique connection name instead.
     let handle = runtime()
-        .block_on(tray.disable_dbus_name(ashpd::is_sandboxed()).spawn())
+        .block_on(
+            tray.disable_dbus_name(ashpd::is_sandboxed())
+                .assume_sni_available(true)
+                .spawn(),
+        )
         .ok()?;
     runtime().spawn(async move {
         while status.changed().await.is_ok() {
@@ -238,7 +278,10 @@ pub fn start(i18n: Localizer, host: Arc<SyncHost>) -> Option<mpsc::UnboundedRece
             }
         }
     });
-    Some(receiver)
+    Some(TrayIcon {
+        actions: receiver,
+        shown,
+    })
 }
 
 #[cfg(test)]
