@@ -6,6 +6,12 @@ Each release is also described in `data/io.github.diegofaraujo.NextGDrive.metain
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-26
+
+### Added
+
+- A signed Flatpak repository at https://diegofaraujo.github.io/nextgdrive/, so Flatpak installs get updates, and the project's website with its privacy policy and terms of service.
+
 ### Fixed
 
 - Closing the window on desktops without a tray (GNOME without the AppIndicator extension, as on Fedora) quit the app and stopped syncing. It now keeps syncing in the background and says so in a notification; launching the app again shows the window, and **Quit** (Ctrl+Q) in its menu stops it. The tray icon appears as soon as the desktop can show it.
@@ -35,6 +41,7 @@ First release.
 - Tray app with notifications and start at login; command-line interface with the same features.
 - English, Portuguese (Brazil) and Spanish.
 
-[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/diegofaraujo/nextgdrive/releases/tag/v0.1.0
