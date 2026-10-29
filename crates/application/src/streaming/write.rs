@@ -80,7 +80,7 @@ where
                 },
             );
         }
-        table.listings.clear();
+        table.invalidate_all();
         Ok(files.len())
     }
 
