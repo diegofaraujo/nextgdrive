@@ -8,8 +8,10 @@ use std::time::{Duration, Instant};
 use nextgdrive_adapter_cache::DiskBlockCache;
 use nextgdrive_adapter_fuse::{Mount, StreamBackend};
 use nextgdrive_adapter_localfs::DiskStaging;
+use nextgdrive_adapter_sqlite::SqliteDriveIndex;
 use nextgdrive_application::streaming::{
-    Entry, NodeAttr, NodeId, StreamConfig, StreamError, StreamState, StreamingDrive, UploadOutcome,
+    Entry, IndexedDrive, NodeAttr, NodeId, StreamConfig, StreamError, StreamState, StreamingDrive,
+    UpdateIndex, UploadOutcome,
 };
 use nextgdrive_domain::{Account, StorageQuota};
 use nextgdrive_i18n::Localizer;
@@ -43,8 +45,12 @@ pub enum StreamEvent {
 
 pub type EventSink = Box<dyn Fn(StreamEvent) + Send + Sync>;
 
+type Drive = IndexedDrive<crate::GoogleDrive, Arc<SqliteDriveIndex>>;
+
 struct AccountStream {
     services: Arc<Services>,
+    /// Drive as this mount sees it: listed from the index once it is built.
+    drive: Drive,
     cache: Arc<DiskBlockCache>,
     staging: Arc<DiskStaging>,
     account: Account,
@@ -62,7 +68,7 @@ type Fs<'a> = StreamingDrive<
     'a,
     crate::GoogleAuthenticator,
     crate::KeyringCredentialStore,
-    crate::GoogleDrive,
+    Drive,
     DiskBlockCache,
     crate::TomlSettingsRepository,
     DiskStaging,
@@ -72,7 +78,7 @@ impl AccountStream {
     fn fs(&self) -> Fs<'_> {
         StreamingDrive::new(
             &self.services.tokens,
-            &self.services.drive,
+            &self.drive,
             &*self.cache,
             &self.services.local.settings,
             &*self.staging,
@@ -106,6 +112,26 @@ impl AccountStream {
             workers.spawn(async move { while stream.fs().refresh_next().await {} });
         }
         while workers.join_next().await.is_some() {}
+    }
+
+    /// Brings the index up to date and forgets the listings it changed.
+    /// Failures (e.g. offline) are told once, until it works again.
+    async fn update_index(&self, failing: &mut bool) {
+        let index = &*self.services.local.index;
+        let result = UpdateIndex::new(&self.services.tokens, &self.services.drive, index)
+            .execute(&self.account)
+            .await;
+        match result {
+            Ok(update) => {
+                self.state.index_changed(&update);
+                *failing = false;
+            }
+            Err(e) if !*failing => {
+                *failing = true;
+                self.report(&StreamError::Failed(e));
+            }
+            Err(_) => {}
+        }
     }
 
     async fn retry_uploads(&self) {
@@ -230,6 +256,7 @@ pub struct StreamMount {
     _mount: Mount,
     retry: tokio::task::JoinHandle<()>,
     refresh: tokio::task::JoinHandle<()>,
+    index: tokio::task::JoinHandle<()>,
     stream: Arc<AccountStream>,
 }
 
@@ -266,6 +293,7 @@ impl Drop for StreamMount {
     fn drop(&mut self) {
         self.retry.abort();
         self.refresh.abort();
+        self.index.abort();
     }
 }
 
@@ -282,7 +310,13 @@ pub fn mount(
 ) -> Result<StreamMount, String> {
     let staging = open_staging(&i18n, &account)?;
     clear_stale_mount(mountpoint);
+    let drive = IndexedDrive::new(
+        services.drive.clone(),
+        services.local.index.clone(),
+        account.id.clone(),
+    );
     let stream = Arc::new(AccountStream {
+        drive,
         services,
         cache,
         staging: Arc::new(staging),
@@ -321,6 +355,18 @@ pub fn mount(
             tokio::time::sleep(UPLOAD_CHECK_INTERVAL).await;
         }
     });
+    let indexing = stream.clone();
+    let index = tokio::spawn(async move {
+        let mut failing = false;
+        loop {
+            indexing.update_index(&mut failing).await;
+            let interval = indexing.services.local.get_settings().execute().map_or(
+                nextgdrive_domain::Settings::DEFAULT_POLL_INTERVAL_SECS,
+                |s| s.poll_interval_secs,
+            );
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+    });
     let refreshing = stream.clone();
     let refresh = tokio::spawn(async move {
         loop {
@@ -332,6 +378,7 @@ pub fn mount(
         _mount: mount,
         retry,
         refresh,
+        index,
         stream,
     })
 }

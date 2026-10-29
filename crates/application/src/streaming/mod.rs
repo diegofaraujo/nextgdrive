@@ -5,6 +5,7 @@
 //! translates kernel requests into these calls. Writes (see `write.rs`) go
 //! to a staging area first and are uploaded when the file is closed.
 
+mod index;
 mod trash_dir;
 mod write;
 
@@ -24,6 +25,7 @@ use crate::ports::{
 };
 use crate::{AppError, TokenProvider};
 
+pub use index::{IndexUpdate, IndexedDrive, REBUILD_INTERVAL, UpdateIndex};
 pub use write::UploadOutcome;
 
 /// Identifies a node for the lifetime of a mount (the FUSE inode number).
@@ -333,6 +335,29 @@ impl StreamState {
 
     fn table(&self) -> std::sync::MutexGuard<'_, Table> {
         self.table.lock().expect("stream table poisoned")
+    }
+
+    /// Forgets the listings an index update made out of date, so they are
+    /// listed again (from the index) when next asked for.
+    pub fn index_changed(&self, update: &IndexUpdate) {
+        let mut table = self.table();
+        if update.rebuilt {
+            table.invalidate_all();
+            return;
+        }
+        let stale: Vec<NodeId> = table
+            .nodes
+            .iter()
+            .filter(|(_, node)| match &node.content {
+                Content::Folder(id) => update.folders.contains(id),
+                Content::Root | Content::SharedDrives => update.drives_changed,
+                _ => false,
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for dir in stale {
+            table.invalidate(dir);
+        }
     }
 }
 
@@ -669,12 +694,11 @@ where
             .table()
             .content(dir)
             .ok_or(StreamError::NotFound)?;
-        let token = self.tokens.access_token(self.account).await?;
         let mut children: Vec<Child> = Vec::new();
         match content {
             Content::Root => {
                 let settings = self.settings.load().map_err(AppError::Storage)?;
-                let drives = self.drive.drives(&token).await.map_err(AppError::Drive)?;
+                let drives = self.drives().await?;
                 for drive in &drives {
                     if drive.kind == DriveKind::MyDrive {
                         children.push((
@@ -698,7 +722,7 @@ where
                 }
             }
             Content::SharedDrives => {
-                let drives = self.drive.drives(&token).await.map_err(AppError::Drive)?;
+                let drives = self.drives().await?;
                 let shared: Vec<(DriveItemId, String)> = drives
                     .into_iter()
                     .filter_map(|d| match d.kind {
@@ -721,11 +745,16 @@ where
                 }
             }
             Content::Folder(folder) => {
-                let items = self
-                    .drive
-                    .children(&token, &folder)
-                    .await
-                    .map_err(AppError::Drive)?;
+                let items = match self.drive.known_children(&folder) {
+                    Some(items) => items,
+                    None => {
+                        let token = self.tokens.access_token(self.account).await?;
+                        self.drive
+                            .children(&token, &folder)
+                            .await
+                            .map_err(AppError::Drive)?
+                    }
+                };
                 let shown: Vec<DriveItem> = items
                     .into_iter()
                     .filter(|i| content_of(i).is_some())
@@ -745,6 +774,16 @@ where
             _ => return Err(StreamError::NotDir),
         }
         Ok(children)
+    }
+
+    /// Known ones (from the index) need no token: they are shown offline
+    /// even when it cannot be renewed.
+    async fn drives(&self) -> Result<Vec<nextgdrive_domain::Drive>, StreamError> {
+        if let Some(drives) = self.drive.known_drives() {
+            return Ok(drives);
+        }
+        let token = self.tokens.access_token(self.account).await?;
+        Ok(self.drive.drives(&token).await.map_err(AppError::Drive)?)
     }
 
     /// Records `dir`'s children, keeping the nodes of those listed before.

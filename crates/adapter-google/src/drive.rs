@@ -1,8 +1,8 @@
 use std::time::SystemTime;
 
 use nextgdrive_application::ports::{
-    AccessToken, Changes, DriveAccountInfo, DriveService, FileReader, FileWriter, PortError,
-    UploadTarget,
+    AccessToken, ChangedItems, Changes, DriveAccountInfo, DriveService, FileReader, FileWriter,
+    ItemChange, PortError, UploadTarget,
 };
 use nextgdrive_domain::{
     Account, AccountId, Capabilities, Drive, DriveItem, DriveItemId, DriveKind, Email, ItemKind,
@@ -26,6 +26,7 @@ const SHORTCUT_MIME: &str = "application/vnd.google-apps.shortcut";
 const GOOGLE_APPS_MIME_PREFIX: &str = "application/vnd.google-apps.";
 
 /// Google Drive API v3 client.
+#[derive(Clone)]
 pub struct GoogleDrive {
     http: oauth2::reqwest::Client,
 }
@@ -275,6 +276,35 @@ struct ChangeList {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemChangeList {
+    next_page_token: Option<String>,
+    new_start_page_token: Option<String>,
+    #[serde(default)]
+    changes: Vec<Change>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Change {
+    /// `file` or `drive` (a shared drive changed).
+    change_type: Option<String>,
+    file_id: Option<String>,
+    /// No longer accessible (deleted, or access lost).
+    #[serde(default)]
+    removed: bool,
+    file: Option<ChangedFile>,
+}
+
+#[derive(Deserialize)]
+struct ChangedFile {
+    #[serde(flatten)]
+    file: File,
+    #[serde(default)]
+    trashed: bool,
+}
+
+#[derive(Deserialize)]
 struct ApiError {
     error: ApiErrorBody,
 }
@@ -402,6 +432,80 @@ impl DriveService for GoogleDrive {
                 }
             }
         }
+    }
+
+    async fn changed_items(
+        &self,
+        token: &AccessToken,
+        cursor: &str,
+    ) -> Result<ChangedItems, PortError> {
+        let fields = format!(
+            "nextPageToken,newStartPageToken,\
+             changes(changeType,fileId,removed,file({FILE_FIELDS},trashed))"
+        );
+        let mut page = cursor.to_owned();
+        let mut all = ChangedItems {
+            changes: Vec::new(),
+            drives_changed: false,
+            cursor: String::new(),
+        };
+        loop {
+            let list: ItemChangeList = self
+                .get(
+                    token,
+                    endpoint(&["changes"]),
+                    &[
+                        ("pageToken", page.as_str()),
+                        ("pageSize", "1000"),
+                        ("supportsAllDrives", "true"),
+                        ("includeItemsFromAllDrives", "true"),
+                        ("fields", &fields),
+                    ],
+                )
+                .await?;
+            let (changes, drives_changed) = changes_to_items(list.changes)?;
+            all.changes.extend(changes);
+            all.drives_changed |= drives_changed;
+            match (list.next_page_token, list.new_start_page_token) {
+                (Some(next), _) => page = next,
+                (None, Some(cursor)) => {
+                    all.cursor = cursor;
+                    return Ok(all);
+                }
+                (None, None) => {
+                    return Err(PortError::new("change feed page without continuation"));
+                }
+            }
+        }
+    }
+
+    async fn items_in(
+        &self,
+        token: &AccessToken,
+        drive: &Drive,
+    ) -> Result<Vec<DriveItem>, PortError> {
+        let fields = format!("nextPageToken,files({FILE_FIELDS})");
+        let mut query = vec![
+            ("q", "trashed = false"),
+            ("fields", fields.as_str()),
+            ("pageSize", "1000"),
+            ("supportsAllDrives", "true"),
+        ];
+        match drive.kind {
+            // My Drive, and what others shared with the user.
+            DriveKind::MyDrive => query.push(("corpora", "user")),
+            DriveKind::Shared { .. } => query.extend([
+                ("corpora", "drive"),
+                ("driveId", drive.root.as_str()),
+                ("includeItemsFromAllDrives", "true"),
+            ]),
+        }
+        let files = self
+            .get_all(token, endpoint(&["files"]), &query, |page: FileList| {
+                (page.files, page.next_page_token)
+            })
+            .await?;
+        files.into_iter().map(file_to_item).collect()
     }
 
     async fn create_folder(
@@ -660,6 +764,27 @@ fn number(value: Option<String>) -> Result<Option<u64>, PortError> {
         .transpose()
 }
 
+/// Changes as items, and whether a shared drive changed. Trashed items count
+/// as removed.
+fn changes_to_items(changes: Vec<Change>) -> Result<(Vec<ItemChange>, bool), PortError> {
+    let mut items = Vec::new();
+    let mut drives_changed = false;
+    for change in changes {
+        if change.change_type.as_deref() == Some("drive") {
+            drives_changed = true;
+            continue;
+        }
+        let Some(id) = change.file_id else { continue };
+        items.push(match change.file {
+            Some(file) if !change.removed && !file.trashed => {
+                ItemChange::Changed(file_to_item(file.file)?)
+            }
+            _ => ItemChange::Removed(DriveItemId::new(id)),
+        });
+    }
+    Ok((items, drives_changed))
+}
+
 fn trashed_to_items(files: Vec<TrashedFile>) -> Result<Vec<TrashedItem>, PortError> {
     files
         .into_iter()
@@ -749,6 +874,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(about_to_info(about).unwrap().quota.limit, None);
+    }
+
+    #[test]
+    fn reads_the_change_feed_item_by_item() {
+        let changes: Vec<Change> = serde_json::from_str(
+            r#"[{"changeType":"file","fileId":"1","removed":false,
+                 "file":{"id":"1","name":"a.txt","mimeType":"text/plain","size":"3","parents":["p"]}},
+                {"changeType":"file","fileId":"2","removed":false,
+                 "file":{"id":"2","name":"b","mimeType":"text/plain","trashed":true}},
+                {"changeType":"file","fileId":"3","removed":true},
+                {"changeType":"drive","driveId":"d"}]"#,
+        )
+        .unwrap();
+
+        let (items, drives_changed) = changes_to_items(changes).unwrap();
+
+        assert!(drives_changed);
+        assert!(matches!(&items[0], ItemChange::Changed(i) if i.name == "a.txt"));
+        assert_eq!(
+            items[1..],
+            [
+                ItemChange::Removed(DriveItemId::new("2")),
+                ItemChange::Removed(DriveItemId::new("3"))
+            ]
+        );
     }
 
     fn item(json: &str) -> DriveItem {

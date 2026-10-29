@@ -3,6 +3,7 @@ mod auth;
 mod block_cache;
 mod credentials;
 mod drive;
+mod drive_index;
 mod error;
 mod local_fs;
 mod settings;
@@ -15,7 +16,8 @@ pub use auth::{
 };
 pub use block_cache::{BlockCache, BlockKey};
 pub use credentials::CredentialStore;
-pub use drive::{Changes, DriveAccountInfo, DriveService, UploadTarget};
+pub use drive::{ChangedItems, Changes, DriveAccountInfo, DriveService, ItemChange, UploadTarget};
+pub use drive_index::{DriveIndex, IndexStatus};
 pub use error::PortError;
 pub use local_fs::{DirEntry, FileReader, FileWriter, LocalFileSystem, LocalMetadata};
 pub use settings::SettingsRepository;
