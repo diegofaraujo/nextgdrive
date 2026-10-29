@@ -1,10 +1,11 @@
 use std::sync::atomic::Ordering;
 
 use super::*;
-use crate::use_cases::fakes::InMemoryStaging;
+use crate::ports::DriveIndex;
 use crate::use_cases::fakes::{
     FakeAuth, FakeDrive, InMemoryBlocks, InMemoryCredentials, InMemorySettings, account,
 };
+use crate::use_cases::fakes::{InMemoryIndex, InMemoryStaging};
 
 type Fs<'a> = StreamingDrive<
     'a,
@@ -744,4 +745,250 @@ async fn preloading_a_file_lists_the_folder_holding_it() {
     w.drive.fail_listing("docs");
 
     assert_eq!(w.path(&["My Drive", "Docs", "a.txt"]).await.attr.size, 20);
+}
+
+// --- Index -------------------------------------------------------------------
+
+type IndexedFs<'a> = StreamingDrive<
+    'a,
+    FakeAuth,
+    InMemoryCredentials,
+    IndexedDrive<FakeDrive, InMemoryIndex>,
+    InMemoryBlocks,
+    InMemorySettings,
+    InMemoryStaging,
+>;
+
+/// A mount whose listings come from the index once it is built.
+struct IndexWorld {
+    account: Account,
+    tokens: TokenProvider<FakeAuth, InMemoryCredentials>,
+    drive: IndexedDrive<FakeDrive, InMemoryIndex>,
+    cache: InMemoryBlocks,
+    settings: InMemorySettings,
+    staging: InMemoryStaging,
+    state: StreamState,
+}
+
+impl IndexWorld {
+    fn new() -> Self {
+        let World {
+            account,
+            tokens,
+            drive,
+            cache,
+            settings,
+            staging,
+            state,
+        } = world(Duration::from_secs(60));
+        let drive = IndexedDrive::new(drive, InMemoryIndex::default(), account.id.clone());
+        Self {
+            account,
+            tokens,
+            drive,
+            cache,
+            settings,
+            staging,
+            state,
+        }
+    }
+
+    fn fs(&self) -> IndexedFs<'_> {
+        StreamingDrive::new(
+            &self.tokens,
+            &self.drive,
+            &self.cache,
+            &self.settings,
+            &self.staging,
+            &self.state,
+            &self.account,
+            "conflict".into(),
+        )
+    }
+
+    fn fake(&self) -> &FakeDrive {
+        self.drive.inner().0
+    }
+
+    fn index(&self) -> &InMemoryIndex {
+        self.drive.inner().1
+    }
+
+    fn children_calls(&self) -> usize {
+        self.fake().children_calls.load(Ordering::Relaxed)
+    }
+
+    /// Runs an index update as the mount's task does.
+    async fn update(&self) -> Result<IndexUpdate, AppError> {
+        let update = UpdateIndex::new(&self.tokens, self.fake(), self.index())
+            .execute(&self.account)
+            .await?;
+        self.state.index_changed(&update);
+        Ok(update)
+    }
+
+    async fn names(&self, path: &[&str]) -> Vec<String> {
+        let mut dir = ROOT;
+        for name in path {
+            dir = self
+                .fs()
+                .lookup(dir, name)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name}"))
+                .attr
+                .id;
+        }
+        let entries = self.fs().list(dir).await.unwrap();
+        entries.into_iter().map(|e| e.name).collect()
+    }
+}
+
+#[tokio::test]
+async fn once_indexed_the_drive_is_browsed_without_asking_drive() {
+    let w = IndexWorld::new();
+    assert!(w.update().await.unwrap().rebuilt);
+
+    assert_eq!(
+        w.names(&["My Drive", "Docs"]).await,
+        ["a.txt", "Budget.html"]
+    );
+    assert_eq!(w.children_calls(), 0);
+}
+
+#[tokio::test]
+async fn before_the_index_is_built_folders_are_listed_from_drive() {
+    let w = IndexWorld::new();
+
+    assert_eq!(
+        w.names(&["My Drive", "Docs"]).await,
+        ["a.txt", "Budget.html"]
+    );
+    assert!(w.children_calls() > 0);
+}
+
+#[tokio::test]
+async fn changes_in_drive_show_as_soon_as_the_feed_reports_them() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+    w.names(&["My Drive", "Docs"]).await;
+
+    w.fake().rename("a", "renamed.txt");
+    let update = w.update().await.unwrap();
+
+    assert!(!update.rebuilt);
+    assert_eq!(update.folders, [DriveItemId::new("docs")]);
+    // Listed again at once, though the listing had not expired.
+    assert_eq!(
+        w.names(&["My Drive", "Docs"]).await,
+        ["renamed.txt", "Budget.html"]
+    );
+    assert_eq!(w.children_calls(), 0);
+}
+
+#[tokio::test]
+async fn local_changes_are_in_the_index_before_the_feed_reports_them() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+    let docs = w
+        .fs()
+        .lookup(ROOT, "My Drive")
+        .await
+        .unwrap()
+        .unwrap()
+        .attr
+        .id;
+    let docs = w.fs().lookup(docs, "Docs").await.unwrap().unwrap().attr.id;
+
+    w.fs().mkdir(docs, "New").await.unwrap();
+    w.fs().unlink(docs, "a.txt").await.unwrap();
+    let file = w.fs().create(docs, "b.txt").await.unwrap();
+    w.fs().write(file.attr.id, 0, b"b").unwrap();
+    w.fs().flush(file.attr.id).await.unwrap();
+    w.fs().upload_pending().await;
+
+    let mut names = w.names(&["My Drive", "Docs"]).await;
+    names.sort();
+    assert_eq!(names, ["Budget.html", "New", "b.txt"]);
+    assert_eq!(w.children_calls(), 0);
+}
+
+#[tokio::test]
+async fn the_indexed_drive_can_be_browsed_without_drive() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+
+    w.fake().fail_listing("root");
+    w.fake().fail_listing("docs");
+    // After a restart offline, not even an access token can be had.
+    w.tokens.credentials().delete(&w.account.id).await.unwrap();
+    w.tokens.forget(&w.account);
+
+    assert_eq!(
+        w.names(&["My Drive", "Docs"]).await,
+        ["a.txt", "Budget.html"]
+    );
+}
+
+#[tokio::test]
+async fn the_whole_drive_is_listed_again_now_and_then() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+    assert!(!w.update().await.unwrap().rebuilt);
+
+    let old = SystemTime::now() - REBUILD_INTERVAL;
+    w.index().set_built(&w.account.id, old);
+
+    assert!(w.update().await.unwrap().rebuilt);
+}
+
+#[tokio::test]
+async fn a_failed_first_listing_leaves_no_index() {
+    let w = IndexWorld::new();
+    w.fake().fail_listing("root");
+
+    assert!(w.update().await.is_err());
+    assert_eq!(w.index().status(&w.account.id).unwrap(), None);
+}
+
+#[tokio::test]
+async fn trashed_folders_come_back_with_their_content() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+    let token = w.tokens.access_token(&w.account).await.unwrap();
+    w.drive
+        .trash(&token, &DriveItemId::new("docs"))
+        .await
+        .unwrap();
+    w.state.table().invalidate_all();
+    assert!(!w.names(&["My Drive"]).await.contains(&"Docs".to_string()));
+
+    w.drive
+        .restore(&token, &DriveItemId::new("docs"))
+        .await
+        .unwrap();
+    w.state.table().invalidate_all();
+
+    assert_eq!(
+        w.names(&["My Drive", "Docs"]).await,
+        ["a.txt", "Budget.html"]
+    );
+    assert_eq!(w.children_calls(), 0);
+}
+
+#[tokio::test]
+async fn new_shared_drives_show_as_soon_as_the_feed_reports_them() {
+    let w = IndexWorld::new();
+    w.update().await.unwrap();
+    assert_eq!(w.names(&[]).await, ["My Drive"]);
+
+    w.fake().add_shared_drive("team", "Team");
+    assert!(w.update().await.unwrap().drives_changed);
+
+    assert_eq!(w.names(&[]).await, ["My Drive", "Shared drives"]);
+    assert!(
+        w.names(&["Shared drives"])
+            .await
+            .contains(&"Team".to_string())
+    );
 }

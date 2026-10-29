@@ -6,6 +6,10 @@ Each release is also described in `data/io.github.diegofaraujo.NextGDrive.metain
 
 ## [Unreleased]
 
+### Changed
+
+- Browsing a Drive shown as a folder (streaming mode) no longer waits for Google on every folder. The whole Drive's file and folder list (names, sizes, dates; no content) is kept on this computer and kept up to date from Drive's change feed, so folders open at once, also offline and right after a restart. Changes made in Drive elsewhere show within the check interval.
+
 ## [0.1.2] - 2026-10-26
 
 ### Added

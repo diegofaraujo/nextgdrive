@@ -6,6 +6,7 @@ pub mod stream;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nextgdrive_adapter_config::{TomlAccountRepository, TomlSettingsRepository};
 use nextgdrive_adapter_google::{
@@ -14,7 +15,7 @@ use nextgdrive_adapter_google::{
 };
 use nextgdrive_adapter_keyring::KeyringCredentialStore;
 use nextgdrive_adapter_localfs::Filesystem;
-use nextgdrive_adapter_sqlite::SqliteSyncState;
+use nextgdrive_adapter_sqlite::{SqliteDriveIndex, SqliteSyncState};
 use nextgdrive_application::TokenProvider;
 use nextgdrive_application::background::BackgroundSync;
 use nextgdrive_application::use_cases::{
@@ -32,6 +33,7 @@ pub type Tokens = TokenProvider<GoogleAuthenticator, KeyringCredentialStore>;
 
 pub const OAUTH_CLIENT_FILE: &str = "oauth-client.json";
 const STATE_FILE: &str = "state.sqlite3";
+const INDEX_FILE: &str = "drive-index.sqlite3";
 /// Default sync folder, inside the home directory.
 const DEFAULT_SYNC_DIR: &str = "GoogleDrive";
 
@@ -42,6 +44,8 @@ pub struct LocalServices {
     pub settings: TomlSettingsRepository,
     pub fs: Filesystem,
     pub state: SqliteSyncState,
+    /// Shared with the mounts of streamed accounts.
+    pub index: Arc<SqliteDriveIndex>,
 }
 
 impl LocalServices {
@@ -50,12 +54,15 @@ impl LocalServices {
         let data = nextgdrive_adapter_config::data_dir().ok_or_else(no_config_dir)?;
         let state = SqliteSyncState::open(&data.join(STATE_FILE))
             .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))?;
+        let index = SqliteDriveIndex::open(&data.join(INDEX_FILE))
+            .map_err(|e| i18n.tr_args("error-storage", [("details", e.to_string().into())]))?;
         Ok(Self {
             accounts: TomlAccountRepository::in_config_dir().ok_or_else(no_config_dir)?,
             settings: TomlSettingsRepository::in_config_dir(default_settings(i18n)?)
                 .ok_or_else(no_config_dir)?,
             fs: Filesystem,
             state,
+            index: Arc::new(index),
         })
     }
 
@@ -161,8 +168,14 @@ impl Services {
         KeyringCredentialStore,
         TomlAccountRepository,
         TomlSettingsRepository,
+        Arc<SqliteDriveIndex>,
     > {
-        RemoveAccount::new(&self.tokens, &self.local.accounts, &self.local.settings)
+        RemoveAccount::new(
+            &self.tokens,
+            &self.local.accounts,
+            &self.local.settings,
+            &self.local.index,
+        )
     }
 
     pub fn browse_drive(

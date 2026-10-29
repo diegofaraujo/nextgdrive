@@ -1,4 +1,6 @@
-//! Sync state in a SQLite database.
+//! Sync state, and the index of streamed Drives, in SQLite databases.
+
+mod drive_index;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -7,6 +9,8 @@ use std::time::{Duration, SystemTime};
 use nextgdrive_application::ports::{PortError, SyncStateStore, SyncedItem, SyncedKind};
 use nextgdrive_domain::{AccountId, DriveItemId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
+
+pub use drive_index::SqliteDriveIndex;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS synced_items (

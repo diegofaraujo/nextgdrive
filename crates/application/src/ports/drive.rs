@@ -22,6 +22,25 @@ pub struct Changes {
     pub cursor: String,
 }
 
+/// One entry of Drive's change feed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ItemChange {
+    /// Created or changed: how it is now.
+    Changed(DriveItem),
+    /// Trashed, deleted, or no longer accessible.
+    Removed(DriveItemId),
+}
+
+/// What changed since a change feed position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedItems {
+    pub changes: Vec<ItemChange>,
+    /// A shared drive was added, renamed or removed.
+    pub drives_changed: bool,
+    /// Where to continue reading next time.
+    pub cursor: String,
+}
+
 /// Where uploaded content goes.
 #[derive(Debug, Clone, Copy)]
 pub enum UploadTarget<'a> {
@@ -46,6 +65,17 @@ pub trait DriveService: Sync {
         token: &AccessToken,
     ) -> impl Future<Output = Result<Vec<Drive>, PortError>> + Send;
 
+    /// The folder's children if known without asking Drive (e.g. from an
+    /// index); then no access token is needed, so they show offline too.
+    fn known_children(&self, _folder: &DriveItemId) -> Option<Vec<DriveItem>> {
+        None
+    }
+
+    /// The drives, if known without asking Drive, as `known_children`.
+    fn known_drives(&self) -> Option<Vec<Drive>> {
+        None
+    }
+
     /// Items directly inside a folder, excluding trashed ones.
     fn children(
         &self,
@@ -66,6 +96,21 @@ pub trait DriveService: Sync {
         token: &AccessToken,
         cursor: Option<&str>,
     ) -> impl Future<Output = Result<Changes, PortError>> + Send;
+
+    /// What changed since `cursor` (from `changes_since`), item by item.
+    fn changed_items(
+        &self,
+        token: &AccessToken,
+        cursor: &str,
+    ) -> impl Future<Output = Result<ChangedItems, PortError>> + Send;
+
+    /// Every item in a drive, at any depth, excluding trashed ones. For My
+    /// Drive it may include items shared with the user that are elsewhere.
+    fn items_in(
+        &self,
+        token: &AccessToken,
+        drive: &Drive,
+    ) -> impl Future<Output = Result<Vec<DriveItem>, PortError>> + Send;
 
     /// Streams a file's content into `out`.
     fn download<W: FileWriter>(

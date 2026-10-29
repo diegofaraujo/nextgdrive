@@ -35,7 +35,7 @@
 <p>Only on your computer, in your user account:</p>
 <ul>
   <li>the files you sync or keep offline, in the folder you choose (by default <code>~/GoogleDrive</code>);</li>
-  <li>a local record of synced items (names, identifiers, checksums, times), used to tell what changed, in <code>~/.local/share/nextgdrive</code>;</li>
+  <li>a local record of synced items (names, identifiers, checksums, times), used to tell what changed, and, for accounts whose whole Drive is shown as a folder, an index of their files and folders (the same metadata, no content) so it can be browsed quickly and offline, in <code>~/.local/share/nextgdrive</code>;</li>
   <li>a cache of recently opened streamed files, in <code>~/.cache/nextgdrive</code>, limited in size;</li>
   <li>the list of linked accounts (email and name) and your settings, in <code>~/.config/nextgdrive</code>;</li>
   <li>the sign-in credential Google issues (a refresh token), only in your system's keyring (a Secret Service provider such as GNOME Keyring or KeePassXC), never in plain files. Short-lived access tokens are kept in memory only.</li>
@@ -45,7 +45,7 @@
 
 <h2>Removing your data</h2>
 <ul>
-  <li><strong>Unlinking an account</strong> in the application deletes its credential from the keyring and the account from the settings. Files already on your computer are kept, so you do not lose them; you can delete them, and the folders listed above, at any time.</li>
+  <li><strong>Unlinking an account</strong> in the application deletes its credential from the keyring, its index, and the account from the settings. Files already on your computer are kept, so you do not lose them; you can delete them, and the folders listed above, at any time.</li>
   <li><strong>Revoking access</strong>: you can withdraw Next GDrive's access to your Google account at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
   <li>Uninstalling the application does not delete your files in Google Drive.</li>
 </ul>

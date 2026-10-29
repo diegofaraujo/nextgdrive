@@ -13,9 +13,10 @@ use nextgdrive_domain::{
 
 use crate::ports::{
     AccessGrant, AccessToken, AccountRepository, Authenticator, AuthorizedTokens, BlockCache,
-    BlockKey, Changes, CredentialStore, DirEntry, DriveAccountInfo, DriveService, FileReader,
-    FileWriter, LocalFileSystem, LocalMetadata, PendingAuthorization, PortError, RefreshToken,
-    SettingsRepository, StagedFile, StagingArea, SyncStateStore, SyncedItem, UploadTarget,
+    BlockKey, ChangedItems, Changes, CredentialStore, DirEntry, DriveAccountInfo, DriveIndex,
+    DriveService, FileReader, FileWriter, IndexStatus, ItemChange, LocalFileSystem, LocalMetadata,
+    PendingAuthorization, PortError, RefreshToken, SettingsRepository, StagedFile, StagingArea,
+    SyncStateStore, SyncedItem, UploadTarget,
 };
 
 #[derive(Default)]
@@ -212,6 +213,10 @@ struct DriveState {
     /// Trashed items, by the item the user trashed: everything hidden with it.
     bin: BTreeMap<DriveItemId, (SystemTime, Vec<DriveItem>)>,
     removed_from_my_drive: Vec<DriveItemId>,
+    /// Shared drives: (root id, name).
+    shared_drives: Vec<(DriveItemId, String)>,
+    /// A shared drive was added since the change feed was last read.
+    drives_changed: bool,
 }
 
 impl DriveState {
@@ -363,6 +368,16 @@ impl FakeDrive {
         self.state().item_mut(id).capabilities = capabilities;
     }
 
+    /// Adds a shared drive (its root folder is not an item, as in Drive).
+    pub fn add_shared_drive(&self, id: &str, name: &str) {
+        let mut state = self.state();
+        state.version += 1;
+        state.drives_changed = true;
+        state
+            .shared_drives
+            .push((DriveItemId::new(id), name.into()));
+    }
+
     pub fn fail_listing(&self, folder: &str) {
         self.state().failing.insert(DriveItemId::new(folder));
     }
@@ -435,10 +450,15 @@ impl DriveService for FakeDrive {
 
     async fn drives(&self, token: &AccessToken) -> Result<Vec<Drive>, PortError> {
         Self::check(token)?;
-        Ok(vec![Drive {
+        let mut drives = vec![Drive {
             root: DriveItemId::new("root"),
             kind: DriveKind::MyDrive,
-        }])
+        }];
+        drives.extend(self.state().shared_drives.iter().map(|(root, name)| Drive {
+            root: root.clone(),
+            kind: DriveKind::Shared { name: name.clone() },
+        }));
+        Ok(drives)
     }
 
     async fn children(
@@ -482,6 +502,63 @@ impl DriveService for FakeDrive {
             any: cursor != Some(current.as_str()),
             cursor: current,
         })
+    }
+
+    /// Every item as changed, and everything trashed as removed, unless
+    /// nothing changed since `cursor`: more than Drive reports, which is
+    /// harmless since applying a change twice changes nothing.
+    async fn changed_items(
+        &self,
+        token: &AccessToken,
+        cursor: &str,
+    ) -> Result<ChangedItems, PortError> {
+        Self::check(token)?;
+        self.changes_calls.fetch_add(1, Ordering::Relaxed);
+        let mut state = self.state();
+        let current = state.version.to_string();
+        let drives_changed = std::mem::take(&mut state.drives_changed);
+        let mut changes = Vec::new();
+        if cursor != current {
+            changes.extend(
+                state
+                    .items
+                    .values()
+                    .filter(|i| i.id.as_str() != "root")
+                    .cloned()
+                    .map(ItemChange::Changed),
+            );
+            changes.extend(
+                state
+                    .bin
+                    .values()
+                    .flat_map(|(_, hidden)| hidden)
+                    .filter(|i| !state.items.contains_key(&i.id))
+                    .map(|i| ItemChange::Removed(i.id.clone())),
+            );
+        }
+        Ok(ChangedItems {
+            changes,
+            drives_changed,
+            cursor: current,
+        })
+    }
+
+    async fn items_in(
+        &self,
+        token: &AccessToken,
+        drive: &Drive,
+    ) -> Result<Vec<DriveItem>, PortError> {
+        Self::check(token)?;
+        let state = self.state();
+        if state.failing.contains(&drive.root) {
+            return Err(PortError::new("listing failed"));
+        }
+        Ok(state
+            .items
+            .values()
+            .filter(|i| i.id != drive.root)
+            .cloned()
+            .collect())
     }
 
     async fn download<W: FileWriter>(
@@ -1167,6 +1244,135 @@ impl StagingArea for InMemoryStaging {
 
     fn remove(&self, key: &str) -> Result<(), PortError> {
         self.0.lock().unwrap().remove(key);
+        Ok(())
+    }
+}
+
+/// An account's `DriveIndex` in memory.
+#[derive(Default)]
+pub struct InMemoryIndex {
+    inner: Mutex<HashMap<AccountId, IndexedAccount>>,
+    /// Makes every write fail, as with a full disk.
+    pub fail: std::sync::atomic::AtomicBool,
+}
+
+#[derive(Default)]
+struct IndexedAccount {
+    status: Option<IndexStatus>,
+    drives: Vec<Drive>,
+    items: BTreeMap<DriveItemId, DriveItem>,
+}
+
+impl InMemoryIndex {
+    fn accounts(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, HashMap<AccountId, IndexedAccount>>, PortError> {
+        if self.fail.load(Ordering::Relaxed) {
+            return Err(PortError::new("index failed"));
+        }
+        Ok(self.inner.lock().unwrap())
+    }
+
+    pub fn set_built(&self, account: &AccountId, built: SystemTime) {
+        let mut accounts = self.inner.lock().unwrap();
+        if let Some(status) = accounts.entry(account.clone()).or_default().status.as_mut() {
+            status.built = built;
+        }
+    }
+}
+
+impl DriveIndex for InMemoryIndex {
+    fn status(&self, account: &AccountId) -> Result<Option<IndexStatus>, PortError> {
+        Ok(self.accounts()?.get(account).and_then(|a| a.status.clone()))
+    }
+
+    fn rebuild(
+        &self,
+        account: &AccountId,
+        drives: &[Drive],
+        items: &[DriveItem],
+        cursor: &str,
+        built: SystemTime,
+    ) -> Result<(), PortError> {
+        self.accounts()?.insert(
+            account.clone(),
+            IndexedAccount {
+                status: Some(IndexStatus {
+                    cursor: cursor.into(),
+                    built,
+                }),
+                drives: drives.to_vec(),
+                items: items.iter().map(|i| (i.id.clone(), i.clone())).collect(),
+            },
+        );
+        Ok(())
+    }
+
+    fn apply(
+        &self,
+        account: &AccountId,
+        changes: &[ItemChange],
+        cursor: Option<&str>,
+    ) -> Result<Vec<DriveItemId>, PortError> {
+        let mut accounts = self.accounts()?;
+        let indexed = accounts.entry(account.clone()).or_default();
+        let mut folders = Vec::new();
+        for change in changes {
+            let (id, new) = match change {
+                ItemChange::Changed(item) => (&item.id, Some(item)),
+                ItemChange::Removed(id) => (id, None),
+            };
+            let old = indexed.items.get(id);
+            if old == new {
+                continue;
+            }
+            folders.extend(old.iter().chain(new.iter()).flat_map(|i| i.parents.clone()));
+            match new {
+                Some(item) => indexed.items.insert(id.clone(), item.clone()),
+                None => indexed.items.remove(id),
+            };
+        }
+        if let (Some(cursor), Some(status)) = (cursor, indexed.status.as_mut()) {
+            status.cursor = cursor.into();
+        }
+        folders.sort();
+        folders.dedup();
+        Ok(folders)
+    }
+
+    fn set_drives(&self, account: &AccountId, drives: &[Drive]) -> Result<(), PortError> {
+        self.accounts()?.entry(account.clone()).or_default().drives = drives.to_vec();
+        Ok(())
+    }
+
+    fn drives(&self, account: &AccountId) -> Result<Vec<Drive>, PortError> {
+        Ok(self
+            .accounts()?
+            .get(account)
+            .map(|a| a.drives.clone())
+            .unwrap_or_default())
+    }
+
+    fn children(
+        &self,
+        account: &AccountId,
+        folder: &DriveItemId,
+    ) -> Result<Vec<DriveItem>, PortError> {
+        Ok(self
+            .accounts()?
+            .get(account)
+            .map(|a| {
+                a.items
+                    .values()
+                    .filter(|i| i.parents.contains(folder))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn forget(&self, account: &AccountId) -> Result<(), PortError> {
+        self.accounts()?.remove(account);
         Ok(())
     }
 }

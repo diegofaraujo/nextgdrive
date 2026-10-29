@@ -1,28 +1,38 @@
 use nextgdrive_domain::{Account, Email};
 
-use crate::ports::{AccountRepository, Authenticator, CredentialStore, SettingsRepository};
+use crate::ports::{
+    AccountRepository, Authenticator, CredentialStore, DriveIndex, SettingsRepository,
+};
 use crate::{AppError, TokenProvider};
 
-/// Unlinks an account from Next GDrive: forgets its credentials and folder
-/// selection. Local files are left untouched.
-pub struct RemoveAccount<'a, A, C, R, S> {
+/// Unlinks an account from Next GDrive: forgets its credentials, folder
+/// selection and Drive index. Local files are left untouched.
+pub struct RemoveAccount<'a, A, C, R, S, I> {
     tokens: &'a TokenProvider<A, C>,
     accounts: &'a R,
     settings: &'a S,
+    index: &'a I,
 }
 
-impl<'a, A, C, R, S> RemoveAccount<'a, A, C, R, S>
+impl<'a, A, C, R, S, I> RemoveAccount<'a, A, C, R, S, I>
 where
     A: Authenticator,
     C: CredentialStore,
     R: AccountRepository,
     S: SettingsRepository,
+    I: DriveIndex,
 {
-    pub fn new(tokens: &'a TokenProvider<A, C>, accounts: &'a R, settings: &'a S) -> Self {
+    pub fn new(
+        tokens: &'a TokenProvider<A, C>,
+        accounts: &'a R,
+        settings: &'a S,
+        index: &'a I,
+    ) -> Self {
         Self {
             tokens,
             accounts,
             settings,
+            index,
         }
     }
 
@@ -45,6 +55,7 @@ where
         if settings.selections.remove(&account.id).is_some() {
             self.settings.save(&settings).map_err(AppError::Storage)?;
         }
+        self.index.forget(&account.id).map_err(AppError::Storage)?;
         self.accounts
             .remove(&account.id)
             .map_err(AppError::Storage)?;
@@ -56,12 +67,12 @@ where
 mod tests {
     use super::*;
     use crate::use_cases::fakes::{
-        FakeAuth, InMemoryAccounts, InMemoryCredentials, InMemorySettings, account,
+        FakeAuth, InMemoryAccounts, InMemoryCredentials, InMemoryIndex, InMemorySettings, account,
     };
     use nextgdrive_domain::{AccountId, DriveItemId};
 
     #[tokio::test]
-    async fn removes_account_credentials_and_selection() {
+    async fn removes_account_credentials_selection_and_index() {
         let repo = InMemoryAccounts::with([account("1", "ana@x.com"), account("2", "zoe@x.com")]);
         let tokens = TokenProvider::new(
             FakeAuth::default(),
@@ -69,8 +80,18 @@ mod tests {
         );
         let settings = InMemorySettings::default();
         settings.update(|s| s.select(&AccountId::new("1"), DriveItemId::new("folder")));
+        let index = InMemoryIndex::default();
+        index
+            .rebuild(
+                &AccountId::new("1"),
+                &[],
+                &[],
+                "c",
+                std::time::SystemTime::now(),
+            )
+            .unwrap();
 
-        let removed = RemoveAccount::new(&tokens, &repo, &settings)
+        let removed = RemoveAccount::new(&tokens, &repo, &settings, &index)
             .execute(&Email::parse("ana@x.com").unwrap())
             .await
             .unwrap();
@@ -79,6 +100,7 @@ mod tests {
         assert_eq!(repo.list().unwrap(), [account("2", "zoe@x.com")]);
         assert!(tokens.credentials().is_empty());
         assert!(settings.load().unwrap().selections.is_empty());
+        assert_eq!(index.status(&AccountId::new("1")).unwrap(), None);
     }
 
     #[tokio::test]
@@ -86,7 +108,7 @@ mod tests {
         let tokens = TokenProvider::new(FakeAuth::default(), InMemoryCredentials::default());
         let (repo, settings) = (InMemoryAccounts::default(), InMemorySettings::default());
 
-        let result = RemoveAccount::new(&tokens, &repo, &settings)
+        let result = RemoveAccount::new(&tokens, &repo, &settings, &InMemoryIndex::default())
             .execute(&Email::parse("ana@x.com").unwrap())
             .await;
 
