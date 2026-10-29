@@ -20,6 +20,9 @@ const QUOTA_TTL: Duration = Duration::from_secs(5 * 60);
 /// How often staged files are checked for uploading: new files once quiet
 /// (`StreamConfig::new_file_quiet`), failed ones after their backoff.
 const UPLOAD_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+/// Folders listed at once in the background (stale ones, and subfolders
+/// listed ahead of being opened).
+const LISTING_WORKERS: usize = 4;
 
 /// Something a mount did that is worth telling, already translated.
 #[derive(Debug, Clone)]
@@ -51,6 +54,8 @@ struct AccountStream {
     i18n: Localizer,
     /// Offline items whose folders were listed in this mount already.
     preloaded: Mutex<std::collections::HashSet<nextgdrive_domain::DriveItemId>>,
+    /// Wakes the task listing folders in the background.
+    refresh: tokio::sync::Notify,
 }
 
 type Fs<'a> = StreamingDrive<
@@ -86,6 +91,23 @@ impl AccountStream {
         }
     }
 
+    /// Lets the background task list what browsing queued.
+    fn wake_refresh(&self) {
+        if self.fs().refresh_pending() {
+            self.refresh.notify_one();
+        }
+    }
+
+    /// Lists queued folders, `LISTING_WORKERS` at a time, until none is left.
+    async fn refresh_listings(self: &Arc<Self>) {
+        let mut workers = tokio::task::JoinSet::new();
+        for _ in 0..LISTING_WORKERS {
+            let stream = self.clone();
+            workers.spawn(async move { while stream.fs().refresh_next().await {} });
+        }
+        while workers.join_next().await.is_some() {}
+    }
+
     async fn retry_uploads(&self) {
         for (name, result) in self.fs().upload_pending().await {
             match result {
@@ -106,11 +128,15 @@ impl StreamBackend for AccountStream {
     }
 
     async fn list(&self, dir: NodeId) -> Result<Vec<Entry>, StreamError> {
-        self.fs().list(dir).await
+        let entries = self.fs().list(dir).await;
+        self.wake_refresh();
+        entries
     }
 
     async fn lookup(&self, dir: NodeId, name: &str) -> Result<Option<Entry>, StreamError> {
-        self.fs().lookup(dir, name).await
+        let entry = self.fs().lookup(dir, name).await;
+        self.wake_refresh();
+        entry
     }
 
     async fn read(&self, id: NodeId, offset: u64, size: u32) -> Result<Vec<u8>, StreamError> {
@@ -203,6 +229,7 @@ pub fn open_cache(i18n: &Localizer, limit: u64) -> Result<Arc<DiskBlockCache>, S
 pub struct StreamMount {
     _mount: Mount,
     retry: tokio::task::JoinHandle<()>,
+    refresh: tokio::task::JoinHandle<()>,
     stream: Arc<AccountStream>,
 }
 
@@ -225,6 +252,7 @@ impl Preloader {
                 preloaded.insert(id.clone());
             }
         }
+        self.0.wake_refresh();
     }
 }
 
@@ -237,6 +265,7 @@ impl StreamMount {
 impl Drop for StreamMount {
     fn drop(&mut self) {
         self.retry.abort();
+        self.refresh.abort();
     }
 }
 
@@ -263,6 +292,7 @@ pub fn mount(
         events,
         i18n: i18n.clone(),
         preloaded: Mutex::default(),
+        refresh: tokio::sync::Notify::new(),
     });
     let pending = stream.fs().recover().map_err(|e| i18n.app_error(&e))?;
     if pending > 0 {
@@ -291,9 +321,17 @@ pub fn mount(
             tokio::time::sleep(UPLOAD_CHECK_INTERVAL).await;
         }
     });
+    let refreshing = stream.clone();
+    let refresh = tokio::spawn(async move {
+        loop {
+            refreshing.refresh.notified().await;
+            refreshing.refresh_listings().await;
+        }
+    });
     Ok(StreamMount {
         _mount: mount,
         retry,
+        refresh,
         stream,
     })
 }

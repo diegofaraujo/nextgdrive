@@ -188,6 +188,8 @@ pub struct FakeDrive {
     account: Account,
     inner: Mutex<DriveState>,
     pub changes_calls: AtomicUsize,
+    /// Calls to `children`, to check which listings ask Drive.
+    pub children_calls: AtomicUsize,
     /// Calls to `download_range`, to check what reads actually fetch.
     pub range_calls: AtomicUsize,
     /// Makes every upload fail, as when offline.
@@ -289,6 +291,7 @@ impl FakeDrive {
             account,
             inner: Mutex::new(state),
             changes_calls: AtomicUsize::new(0),
+            children_calls: AtomicUsize::new(0),
             range_calls: AtomicUsize::new(0),
             fail_uploads: std::sync::atomic::AtomicBool::new(false),
         }
@@ -444,16 +447,22 @@ impl DriveService for FakeDrive {
         folder: &DriveItemId,
     ) -> Result<Vec<DriveItem>, PortError> {
         Self::check(token)?;
-        let state = self.state();
-        if state.failing.contains(folder) {
-            return Err(PortError::new("listing failed"));
-        }
-        Ok(state
-            .items
-            .values()
-            .filter(|item| item.parents.contains(folder))
-            .cloned()
-            .collect())
+        self.children_calls.fetch_add(1, Ordering::Relaxed);
+        let children = {
+            let state = self.state();
+            if state.failing.contains(folder) {
+                return Err(PortError::new("listing failed"));
+            }
+            state
+                .items
+                .values()
+                .filter(|item| item.parents.contains(folder))
+                .cloned()
+                .collect()
+        };
+        // Drive answers a moment later: what changed meanwhile is not in it.
+        tokio::task::yield_now().await;
+        Ok(children)
     }
 
     async fn item(&self, token: &AccessToken, id: &DriveItemId) -> Result<DriveItem, PortError> {

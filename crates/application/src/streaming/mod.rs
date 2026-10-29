@@ -11,7 +11,7 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -75,7 +75,8 @@ impl From<AppError> for StreamError {
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamConfig {
-    /// How long a folder listing is trusted before asking Drive again.
+    /// How long a folder listing is trusted before asking Drive again. An
+    /// older one is still shown at once, and refreshed in the background.
     pub listing_ttl: Duration,
     /// Content is fetched and cached in blocks of this many bytes.
     pub block_size: u64,
@@ -175,8 +176,13 @@ struct Table {
     /// (parent, what the child is) → node, so a node keeps its id when its
     /// folder is listed again, even if it was renamed.
     by_key: HashMap<(NodeId, String), NodeId>,
-    /// Children of a listed folder, with their names, and when it was listed.
-    listings: HashMap<NodeId, (Instant, Vec<(String, NodeId)>)>,
+    listings: HashMap<NodeId, Listing>,
+    /// Folders to list in the background (see `refresh_next`): stale ones
+    /// shown first, then those listed ahead of being opened.
+    refresh: VecDeque<NodeId>,
+    /// Bumped whenever listings are forgotten, so a background listing that
+    /// started before a change here is not stored over it.
+    epoch: u64,
     /// Where the last read of each file ended, to recognize sequential reads.
     read_ends: HashMap<NodeId, u64>,
     staged: HashMap<String, Staging>,
@@ -185,6 +191,15 @@ struct Table {
     /// Children that exist only on this computer, per folder.
     local_children: HashMap<NodeId, Vec<(String, NodeId)>>,
     next: NodeId,
+}
+
+/// Children of a listed folder, with their names.
+#[derive(Debug, Clone)]
+struct Listing {
+    at: Instant,
+    children: Vec<(String, NodeId)>,
+    /// Whether its subfolders were queued to be listed ahead.
+    expanded: bool,
 }
 
 impl Table {
@@ -240,6 +255,50 @@ impl Table {
     /// Forgets a folder listing, so the next request asks Drive again.
     fn invalidate(&mut self, dir: NodeId) {
         self.listings.remove(&dir);
+        self.epoch += 1;
+    }
+
+    fn invalidate_all(&mut self) {
+        self.listings.clear();
+        self.epoch += 1;
+    }
+
+    /// Queues `dir` to be listed in the background; `urgent` ones go first.
+    fn queue_refresh(&mut self, dir: NodeId, urgent: bool) {
+        let queued = self.refresh.iter().position(|d| *d == dir);
+        match (queued, urgent) {
+            (Some(at), true) => {
+                self.refresh.remove(at);
+                self.refresh.push_front(dir);
+            }
+            (Some(_), false) => {}
+            (None, true) => self.refresh.push_front(dir),
+            (None, false) => self.refresh.push_back(dir),
+        }
+    }
+
+    /// A folder's listing, even if stale (then queued to be refreshed). The
+    /// first time it is shown, its subfolders not listed yet are queued, so
+    /// they open at once.
+    fn shown_listing(&mut self, dir: NodeId, ttl: Duration) -> Option<Vec<(String, NodeId)>> {
+        let listing = self.listings.get_mut(&dir)?;
+        let stale = listing.at.elapsed() >= ttl;
+        let expand = !std::mem::replace(&mut listing.expanded, true);
+        let children = listing.children.clone();
+        if stale {
+            self.queue_refresh(dir, true);
+        }
+        if expand {
+            for (_, id) in &children {
+                let folder = self.nodes.get(id).is_some_and(|n| {
+                    matches!(n.content, Content::Folder(_) | Content::SharedDrives)
+                });
+                if folder && !self.listings.contains_key(id) {
+                    self.queue_refresh(*id, false);
+                }
+            }
+        }
+        Some(children)
     }
 }
 
@@ -329,32 +388,20 @@ where
 
     pub async fn list(&self, dir: NodeId) -> Result<Vec<Entry>, StreamError> {
         let local_dir = matches!(self.state.table().content(dir), Some(Content::Local(_)));
-        let fresh = if local_dir {
-            Some(Vec::new())
+        let children = if local_dir {
+            Vec::new()
         } else {
-            let table = self.state.table();
-            table
-                .listings
-                .get(&dir)
-                .filter(|(at, _)| at.elapsed() < self.state.config.listing_ttl)
-                .map(|(_, children)| children.clone())
-        };
-        let children = match fresh {
-            Some(children) => children,
-            None => match self.fetch_listing(dir).await {
-                Ok(children) => children,
-                // Offline (or Drive failing): the last listing is better than
-                // none, and offline files can still be opened from it.
-                Err(error) => {
-                    let stale = self
-                        .state
-                        .table()
-                        .listings
-                        .get(&dir)
-                        .map(|(_, c)| c.clone());
-                    stale.ok_or(error)?
+            let ttl = self.state.config.listing_ttl;
+            let shown = self.state.table().shown_listing(dir, ttl);
+            match shown {
+                Some(children) => children,
+                None => {
+                    let children = self.fetch_children(dir).await?;
+                    let mut table = self.state.table();
+                    self.store_listing(&mut table, dir, children);
+                    table.shown_listing(dir, ttl).unwrap_or_default()
                 }
-            },
+            }
         };
         let table = self.state.table();
         let local = table.local_children.get(&dir).cloned().unwrap_or_default();
@@ -575,16 +622,55 @@ where
         Ok(first.unwrap_or_default())
     }
 
-    async fn fetch_listing(&self, dir: NodeId) -> Result<Vec<(String, NodeId)>, StreamError> {
+    /// Lists the next folder waiting to be listed in the background, if any
+    /// (`false` once none is left). One that became fresh meanwhile is
+    /// skipped; if listing fails (e.g. offline), the stale listing is kept
+    /// and trusted for another `listing_ttl` before trying again.
+    pub async fn refresh_next(&self) -> bool {
+        let (dir, epoch) = {
+            let mut table = self.state.table();
+            let Some(dir) = table.refresh.pop_front() else {
+                return false;
+            };
+            let ttl = self.state.config.listing_ttl;
+            let fresh = table
+                .listings
+                .get(&dir)
+                .is_some_and(|l| l.at.elapsed() < ttl);
+            if fresh {
+                return true;
+            }
+            (dir, table.epoch)
+        };
+        let fetched = self.fetch_children(dir).await;
+        let mut table = self.state.table();
+        match fetched {
+            Ok(children) if table.epoch == epoch => self.store_listing(&mut table, dir, children),
+            // Something changed here meanwhile; the next request lists it again.
+            Ok(_) => {}
+            Err(_) => {
+                if let Some(listing) = table.listings.get_mut(&dir) {
+                    listing.at = Instant::now();
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether folders are waiting to be listed in the background.
+    pub fn refresh_pending(&self) -> bool {
+        !self.state.table().refresh.is_empty()
+    }
+
+    /// A folder's children in Drive: (key, display name, content, modified).
+    async fn fetch_children(&self, dir: NodeId) -> Result<Vec<Child>, StreamError> {
         let content = self
             .state
             .table()
             .content(dir)
             .ok_or(StreamError::NotFound)?;
         let token = self.tokens.access_token(self.account).await?;
-        // (key, display name, content, modified)
-        let mut children: Vec<(String, String, Content, SystemTime)> = Vec::new();
-        let mut folder_id = None;
+        let mut children: Vec<Child> = Vec::new();
         match content {
             Content::Root => {
                 let settings = self.settings.load().map_err(AppError::Storage)?;
@@ -655,12 +741,18 @@ where
                         item.modified,
                     ));
                 }
-                folder_id = Some(folder);
             }
             _ => return Err(StreamError::NotDir),
         }
+        Ok(children)
+    }
 
-        let mut table = self.state.table();
+    /// Records `dir`'s children, keeping the nodes of those listed before.
+    fn store_listing(&self, table: &mut Table, dir: NodeId, children: Vec<Child>) {
+        let folder_id = match table.content(dir) {
+            Some(Content::Folder(folder)) => Some(folder),
+            _ => None,
+        };
         let mut listing = Vec::with_capacity(children.len());
         for (key, name, mut content, modified) in children {
             let id = table.node_for(dir, key);
@@ -695,12 +787,19 @@ where
                 listing.push((name, id));
             }
         }
-        table
-            .listings
-            .insert(dir, (Instant::now(), listing.clone()));
-        Ok(listing)
+        table.listings.insert(
+            dir,
+            Listing {
+                at: Instant::now(),
+                children: listing,
+                expanded: false,
+            },
+        );
     }
 }
+
+/// A folder's child as Drive lists it: (key, display name, content, modified).
+type Child = (String, String, Content, SystemTime);
 
 /// Drive's version of a file's content: its MD5, or else its modification time.
 pub(crate) fn version_of(item: &DriveItem) -> String {

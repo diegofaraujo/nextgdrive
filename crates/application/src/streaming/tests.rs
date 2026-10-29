@@ -90,6 +90,11 @@ impl World {
         }
         entry.expect("non-empty path")
     }
+
+    /// Lists everything queued for the background, as the mount's task does.
+    async fn refresh(&self) {
+        while self.fs().refresh_next().await {}
+    }
 }
 
 fn names(entries: &[Entry]) -> Vec<&str> {
@@ -150,6 +155,8 @@ async fn new_versions_never_get_stale_blocks() {
     w.fs().read(a.attr.id, 0, 4).await.unwrap();
 
     w.drive.set_content("a", "NEW CONTENT");
+    w.path(&["My Drive", "Docs", "a.txt"]).await;
+    w.refresh().await;
     let again = w.path(&["My Drive", "Docs", "a.txt"]).await;
 
     assert_eq!(again.attr.id, a.attr.id, "same file keeps its node");
@@ -179,6 +186,8 @@ async fn renamed_items_keep_their_node() {
 
     w.drive.rename("a", "renamed.txt");
     let docs = w.path(&["My Drive", "Docs"]).await;
+    w.fs().list(docs.attr.id).await.unwrap();
+    w.refresh().await;
 
     assert!(
         w.fs()
@@ -202,6 +211,69 @@ async fn listings_are_reused_until_they_expire() {
     w.drive.rename("a", "renamed.txt");
 
     assert_eq!(names(&w.fs().list(docs.attr.id).await.unwrap())[0], "a.txt");
+}
+
+#[tokio::test]
+async fn expired_listings_are_shown_at_once_and_refreshed_in_the_background() {
+    let w = world(Duration::ZERO);
+    let docs = w.docs().await;
+    w.fs().list(docs).await.unwrap();
+    w.refresh().await;
+    w.drive.rename("a", "renamed.txt");
+    let calls = w.drive.children_calls.load(Ordering::Relaxed);
+
+    // Shown without asking Drive, and queued.
+    assert_eq!(names(&w.fs().list(docs).await.unwrap())[0], "a.txt");
+    assert_eq!(w.drive.children_calls.load(Ordering::Relaxed), calls);
+    assert!(w.fs().refresh_pending());
+
+    w.refresh().await;
+    assert_eq!(names(&w.fs().list(docs).await.unwrap())[0], "renamed.txt");
+}
+
+#[tokio::test]
+async fn subfolders_are_listed_ahead_of_being_opened() {
+    let w = world(Duration::from_secs(60));
+    let docs = w.docs().await;
+    w.fs().mkdir(docs, "Inner").await.unwrap();
+    w.fs().list(docs).await.unwrap();
+
+    w.refresh().await;
+    let calls = w.drive.children_calls.load(Ordering::Relaxed);
+
+    let inner = w.path(&["My Drive", "Docs", "Inner"]).await;
+    assert!(w.fs().list(inner.attr.id).await.unwrap().is_empty());
+    assert_eq!(w.drive.children_calls.load(Ordering::Relaxed), calls);
+}
+
+#[tokio::test]
+async fn a_background_listing_never_undoes_a_change_made_meanwhile() {
+    let w = world(Duration::ZERO);
+    let docs = w.docs().await;
+    w.fs().list(docs).await.unwrap();
+    assert!(w.fs().refresh_pending());
+
+    // The queued listing is answered after the folder is created here.
+    let fs = w.fs();
+    let (_, created) = tokio::join!(fs.refresh_next(), fs.mkdir(docs, "New"));
+    created.unwrap();
+
+    assert!(names(&w.fs().list(docs).await.unwrap()).contains(&"New"));
+}
+
+#[tokio::test]
+async fn failed_background_listings_wait_before_retrying() {
+    let w = world(Duration::from_millis(50));
+    let docs = w.docs().await;
+    w.fs().list(docs).await.unwrap();
+    std::thread::sleep(Duration::from_millis(60));
+    w.drive.fail_listing("docs");
+
+    w.fs().list(docs).await.unwrap();
+    w.refresh().await;
+    w.fs().list(docs).await.unwrap();
+
+    assert!(!w.fs().refresh_pending(), "trusted for another listing_ttl");
 }
 
 // --- Writing -----------------------------------------------------------------
