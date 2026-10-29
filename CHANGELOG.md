@@ -6,6 +6,8 @@ Each release is also described in `data/io.github.diegofaraujo.NextGDrive.metain
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-29
+
 ### Changed
 
 - Browsing a Drive shown as a folder (streaming mode) no longer waits for Google on every folder. The whole Drive's file and folder list (names, sizes, dates; no content) is kept on this computer and kept up to date from Drive's change feed, so folders open at once, also offline and right after a restart. Changes made in Drive elsewhere show within the check interval.
@@ -45,7 +47,8 @@ First release.
 - Tray app with notifications and start at login; command-line interface with the same features.
 - English, Portuguese (Brazil) and Spanish.
 
-[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/diegofaraujo/nextgdrive/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/diegofaraujo/nextgdrive/releases/tag/v0.1.0
