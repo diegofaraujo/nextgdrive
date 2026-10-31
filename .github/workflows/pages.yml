@@ -73,7 +73,7 @@ jobs:
             "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" \
             "${FLATPAK_GPG_KEY_ID}" "${GNUPGHOME}"
           rm -rf "${GNUPGHOME}"
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: public
 
