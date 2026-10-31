@@ -140,7 +140,7 @@ jobs:
           else
             echo "::warning::No OAuth client embedded (secrets not available): fine for a test build only."
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.arch }}
           path: dist/*
@@ -160,7 +160,7 @@ jobs:
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install --quiet "aiohttp>=3.9.5,<4" "tomlkit>=0.13.3,<1" "PyYAML>=6.0.2,<7"
           /tmp/venv/bin/python flatpak-cargo-generator.py Cargo.lock -o flatpak/cargo-sources.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak-cargo-sources
           path: flatpak/cargo-sources.json
@@ -219,7 +219,7 @@ jobs:
           flatpak install --user --noninteractive flathub org.flatpak.Builder
           flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest flatpak/io.github.diegofaraujo.NextGDrive.yml || true
           flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-${{ matrix.arch }}
           path: NextGDrive-${{ env.VERSION }}-${{ matrix.arch }}.flatpak
